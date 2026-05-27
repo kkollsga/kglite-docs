@@ -1,0 +1,264 @@
+"""Typed MCP tool registrations.
+
+Each tool is a thin shim over the Corpus method of the same name.
+Argument names and shapes are the agent-facing contract — keep them
+stable across versions.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def register_typed_tools(app: Any, corpus: Any) -> None:
+    """Register the kglite-docs tools on a FastMCP app."""
+
+    @app.tool()
+    def list_documents(filters: dict[str, Any] | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        """List ingested documents with metadata. Optional `filters` is an
+        equality map (e.g. `{"lang": "en"}`)."""
+        return corpus.list_documents(filters=filters, limit=limit)
+
+    @app.tool()
+    def get_document(doc_id: str) -> dict[str, Any] | None:
+        """Fetch one document's metadata + a heading-derived TOC."""
+        return corpus.get_document(doc_id)
+
+    @app.tool()
+    def search(
+        query: str,
+        top_k: int = 10,
+        filters: dict[str, Any] | None = None,
+        with_summaries: bool = False,
+        agent_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Semantic + filtered chunk search. Pass `agent_id` to record
+        views automatically."""
+        return corpus.search(
+            query, top_k=top_k, filters=filters,
+            with_summaries=with_summaries, agent_id=agent_id,
+        )
+
+    @app.tool()
+    def get_chunk(
+        chunk_id: str,
+        with_neighbors: bool = False,
+        with_summaries: bool = False,
+        agent_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch one chunk with optional prev/next ids and inlined summaries."""
+        return corpus.get_chunk(
+            chunk_id, with_neighbors=with_neighbors,
+            with_summaries=with_summaries, agent_id=agent_id,
+        )
+
+    @app.tool()
+    def similar_chunks(chunk_id: str, top_k: int = 10) -> list[dict[str, Any]]:
+        """Nearest-neighbor chunks for a given chunk_id."""
+        return corpus.similar_chunks(chunk_id, top_k=top_k)
+
+    @app.tool()
+    def compose_context(
+        query: str,
+        max_tokens: int = 4000,
+        per_doc_cap: int | None = None,
+        include_summaries: bool = True,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a budgeted, ranked context bundle for a query."""
+        return corpus.compose_context(
+            query, max_tokens=max_tokens, per_doc_cap=per_doc_cap,
+            include_summaries=include_summaries, agent_id=agent_id,
+        )
+
+    @app.tool()
+    def add_summary(
+        target_id: str,
+        text: str,
+        agent_id: str,
+        target_kind: str = "Chunk",
+        depth: str = "chunk",
+        model: str = "",
+        tags: list[str] | None = None,
+    ) -> str:
+        """Write a Summary on a chunk/page/document. Returns the summary id."""
+        return corpus.add_summary(
+            target_id, text, target_kind=target_kind, depth=depth,
+            agent_id=agent_id, model=model, tags=tags or [],
+        )
+
+    @app.tool()
+    def verify_summary(
+        summary_id: str,
+        verdict: str,
+        verifier_agent_id: str,
+        notes: str = "",
+    ) -> dict[str, Any]:
+        """Apply a verification verdict to a summary. Verifier must
+        differ from the author."""
+        return corpus.verify_summary(
+            summary_id, verdict=verdict, verifier_agent_id=verifier_agent_id, notes=notes,
+        )
+
+    @app.tool()
+    def link_verification(verifier_summary_id: str, target_summary_id: str) -> dict[str, Any]:
+        """Record that one summary verifies / disputes another."""
+        return corpus.link_verification(verifier_summary_id, target_summary_id)
+
+    @app.tool()
+    def get_summaries(
+        target_id: str,
+        target_kind: str | None = None,
+        status: str | None = None,
+        depth: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List summaries on a target, filterable by status/depth."""
+        return corpus.get_summaries(
+            target_id, target_kind=target_kind, status=status, depth=depth,
+        )
+
+    @app.tool()
+    def find_consensus(query: str, top_k: int = 20) -> list[dict[str, Any]]:
+        """Semantic search across summaries; groups by target with status counts."""
+        return corpus.find_consensus(query, top_k=top_k)
+
+    @app.tool()
+    def tag_chunk(
+        chunk_id: str, tag_name: str, agent_id: str,
+        kind: str = "custom", confidence: float | None = None,
+    ) -> dict[str, Any]:
+        """Tag a chunk. Idempotent per (chunk, tag, agent)."""
+        return corpus.tag_chunk(
+            chunk_id, tag_name, kind=kind, agent_id=agent_id, confidence=confidence,
+        )
+
+    @app.tool()
+    def untag_chunk(chunk_id: str, tag_name: str, agent_id: str) -> dict[str, Any]:
+        """Remove the calling agent's application of a tag from a chunk."""
+        return corpus.untag_chunk(chunk_id, tag_name, agent_id=agent_id)
+
+    @app.tool()
+    def list_tags(
+        doc_id: str | None = None, chunk_id: str | None = None,
+        agent_id: str | None = None, kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List tag applications, filterable by doc/chunk/agent/kind."""
+        return corpus.list_tags(
+            doc_id=doc_id, chunk_id=chunk_id, agent_id=agent_id, kind=kind,
+        )
+
+    @app.tool()
+    def chunks_by_tag(tag_name: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Find all chunks carrying a given tag."""
+        return corpus.chunks_by_tag(tag_name, limit=limit)
+
+    @app.tool()
+    def register_agent(agent_id: str, kind: str = "llm", model: str = "") -> dict[str, Any]:
+        """Explicit agent registration. Most write paths auto-register
+        on first use; this tool exists for setting `kind`/`model`."""
+        return corpus.register_agent(agent_id, kind=kind, model=model)
+
+    @app.tool()
+    def list_agents() -> list[dict[str, Any]]:
+        """List registered agents with last-seen + action counts."""
+        return corpus.list_agents()
+
+    @app.tool()
+    def record_view(chunk_id: str, agent_id: str, context: str = "") -> dict[str, Any]:
+        """Record an agent viewing a chunk (explicit; search/get_chunk
+        also do this when given `agent_id`)."""
+        return corpus.record_view(chunk_id, agent_id, context=context)
+
+    @app.tool()
+    def list_pending_ocr(
+        doc_id: str | None = None, limit: int = 20,
+        include_images: bool = True, dpi: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Pages flagged `needs_ocr=True`, each with a base64 PNG render."""
+        return corpus.list_pending_ocr(
+            doc_id=doc_id, limit=limit, include_images=include_images, dpi=dpi,
+        )
+
+    @app.tool()
+    def submit_ocr(
+        page_id: str, markdown: str, agent_id: str,
+        model: str = "", confidence: float | None = None,
+    ) -> dict[str, Any]:
+        """Patch agent-supplied OCR markdown back into a page; re-chunks + re-embeds."""
+        return corpus.submit_ocr(
+            page_id, markdown, agent_id=agent_id, model=model, confidence=confidence,
+        )
+
+    @app.tool()
+    def cluster_chunks(
+        algorithm: str = "louvain", params: dict[str, Any] | None = None, note: str = "",
+    ) -> dict[str, Any]:
+        """Run a clustering pass over the chunk embeddings. Writes
+        Cluster nodes + IN_CLUSTER edges."""
+        return corpus.cluster_chunks(algorithm=algorithm, params=params, note=note)
+
+    @app.tool()
+    def get_cluster(cluster_id: str, top_terms: int = 10) -> dict[str, Any] | None:
+        """Inspect a cluster: members + top lexical terms."""
+        return corpus.get_cluster(cluster_id, top_terms=top_terms)
+
+    @app.tool()
+    def cluster_overview() -> list[dict[str, Any]]:
+        """List all clusters with sizes and run ids."""
+        return corpus.cluster_overview()
+
+    @app.tool()
+    def check_grounding(summary_id: str, threshold: float = 0.5) -> dict[str, Any]:
+        """Per-sentence grounding check: which sentences of a summary
+        have weak support in the source chunks?"""
+        return corpus.check_grounding(summary_id, threshold=threshold)
+
+    @app.tool()
+    def verify_claim(
+        claim_text: str, against_chunk_ids: list[str] | None = None, top_k: int = 5,
+    ) -> dict[str, Any]:
+        """Find the chunks that best support a free-text claim."""
+        return corpus.verify_claim(
+            claim_text, against_chunk_ids=against_chunk_ids, top_k=top_k,
+        )
+
+    @app.tool()
+    def add_translation(
+        chunk_id: str, target_lang: str, text: str, agent_id: str,
+        model: str = "", status: str = "draft",
+    ) -> str:
+        """Store a translation of a chunk into `target_lang`."""
+        return corpus.add_translation(
+            chunk_id, target_lang, text, agent_id=agent_id, model=model, status=status,
+        )
+
+    @app.tool()
+    def get_translations(chunk_id: str, target_lang: str | None = None) -> list[dict[str, Any]]:
+        """List translations on a chunk, optionally filtered by language."""
+        return corpus.get_translations(chunk_id, target_lang=target_lang)
+
+    @app.tool()
+    def assemble_translated_document(
+        doc_id: str, target_lang: str, prefer_reviewed: bool = True,
+    ) -> dict[str, Any]:
+        """Stitch a document's translated chunks back together. Untranslated
+        pages fall back to the original."""
+        return corpus.assemble_translated_document(
+            doc_id, target_lang=target_lang, prefer_reviewed=prefer_reviewed,
+        )
+
+    @app.tool()
+    def export_document(
+        doc_id: str, out_path: str, format: str | None = None,
+        include_summaries: bool = False,
+    ) -> str:
+        """Export a document to MD / DOCX / PDF. Returns the written path."""
+        p = corpus.export_document(
+            doc_id, out_path, format=format, include_summaries=include_summaries,
+        )
+        return str(p)
+
+    @app.tool()
+    def export_cluster(cluster_id: str, out_path: str, format: str | None = None) -> str:
+        """Export a cluster (members + summaries) to MD / DOCX / PDF."""
+        return str(corpus.export_cluster(cluster_id, out_path, format=format))

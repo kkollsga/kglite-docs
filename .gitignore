@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Testing / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Hatch
+src/kglite_docs/_version.py
+
+# Local artifacts
+*.kgl
+!sample_data/*.kgl
+tmp/
+.DS_Store
+
+# Sample PDFs (downloadable via scripts/fetch_sample_pdfs.sh — too big for the repo)
+sample_data/pdfs/
+sample_data/subset/
+demo.kgl
+synthesis_*.md
+factcheck_*.json

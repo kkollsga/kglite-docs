@@ -1,0 +1,126 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or commit to release
+        required: true
+      target:
+        description: PyPI target (testpypi or pypi)
+        required: true
+        default: testpypi
+
+permissions:
+  contents: write          # for GitHub release notes
+  id-token: write          # for PyPI Trusted Publishing (OIDC)
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # hatch-vcs needs full history for version-from-tag
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/kglite-docs/
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI (trusted publisher)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  smoke-test-testpypi:
+    name: Smoke-test TestPyPI release
+    needs: publish-testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install from TestPyPI
+        run: |
+          python -m pip install --upgrade pip
+          # Install our package from TestPyPI, but pull regular deps from PyPI
+          python -m pip install \
+            --index-url https://test.pypi.org/simple/ \
+            --extra-index-url https://pypi.org/simple/ \
+            kglite-docs
+
+      - name: Smoke import
+        run: |
+          python -c "from kglite_docs import Corpus; print(Corpus.create.__doc__ or 'ok')"
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: smoke-test-testpypi
+    runs-on: ubuntu-latest
+    # Only auto-publish on tag pushes; manual dispatch can stop at TestPyPI
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/project/kglite-docs/
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (trusted publisher)
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Create GitHub release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

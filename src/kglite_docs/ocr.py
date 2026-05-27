@@ -1,0 +1,164 @@
+"""Scanned-page detection + agent-driven OCR submission.
+
+`list_pending_ocr` returns pages where text extraction came up empty
+but the page carries images — typically scanned PDFs. Each entry
+includes a base64-encoded PNG render so the agent can read the page
+visually and return its markdown via `submit_ocr`.
+"""
+
+from __future__ import annotations
+
+import base64
+from pathlib import Path
+from typing import Any
+
+from kglite_docs.activity import register_agent
+from kglite_docs.ingest.chunker import chunk_page
+from kglite_docs.ingest.hashing import text_hash
+from kglite_docs.ingest.parser import render_page_png
+from kglite_docs.schema import (
+    CHUNK,
+    CHUNK_STATUS_NEEDS_OCR,
+    CHUNK_STATUS_READY,
+    CHUNK_TEXT_COL,
+    HAS_CHUNK,
+    NEXT_CHUNK,
+    PAGE,
+)
+from kglite_docs.store import Store
+
+
+from kglite_docs.store import rows as _df_dicts  # noqa: E402
+
+
+def list_pending_ocr(
+    store: Store,
+    *,
+    doc_id: str | None = None,
+    limit: int = 20,
+    include_images: bool = True,
+    dpi: int = 200,
+) -> list[dict[str, Any]]:
+    where = ["p.needs_ocr = true"]
+    params: dict[str, Any] = {}
+    if doc_id:
+        where.append("p.doc_id = $doc_id")
+        params["doc_id"] = doc_id
+    rows = _df_dicts(store.cypher(
+        f"MATCH (d:Document)-[:HAS_PAGE]->(p:Page) WHERE {' AND '.join(where)} "
+        "RETURN p.id AS page_id, p.doc_id AS doc_id, p.page_number AS page_number, "
+        "d.path AS doc_path, d.title AS doc_title "
+        f"ORDER BY p.doc_id, p.page_number LIMIT {int(limit)}",
+        params=params,
+    ))
+    if include_images:
+        for r in rows:
+            try:
+                png = render_page_png(r["doc_path"], int(r["page_number"]), dpi=dpi)
+                r["image_b64"] = base64.b64encode(png).decode("ascii")
+                r["image_mime"] = "image/png"
+            except Exception as exc:  # pragma: no cover
+                r["image_b64"] = ""
+                r["image_error"] = str(exc)
+    return rows
+
+
+def submit_ocr(
+    store: Store,
+    embedder: Any,
+    *,
+    page_id: str,
+    markdown: str,
+    agent_id: str,
+    model: str = "",
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    """Patch OCR-derived markdown back into the graph.
+
+    - Marks the Page as having text, `needs_ocr=False`.
+    - Deletes the placeholder Chunk(s) on that page (status=needs_ocr).
+    - Re-chunks the supplied markdown into fresh Chunks (status=ready),
+      wires HAS_CHUNK + NEXT_CHUNK locally, and writes embeddings.
+    """
+    register_agent(store, agent_id=agent_id)
+    markdown = markdown.strip()
+    page_rows = _df_dicts(store.cypher(
+        "MATCH (p:Page {id: $id}) RETURN p.doc_id AS doc_id, p.page_number AS page_number",
+        params={"id": page_id},
+    ))
+    if not page_rows:
+        raise ValueError(f"page not found: {page_id}")
+    doc_id = page_rows[0]["doc_id"]
+    page_number = int(page_rows[0]["page_number"])
+
+    # Delete existing needs_ocr chunks on this page
+    store.cypher(
+        "MATCH (p:Page {id: $pid})-[:HAS_CHUNK]->(c:Chunk) "
+        "WHERE c.status = $st DETACH DELETE c",
+        params={"pid": page_id, "st": CHUNK_STATUS_NEEDS_OCR},
+    )
+    # Update page state
+    store.cypher(
+        "MATCH (p:Page {id: $pid}) "
+        "SET p.markdown = $md, p.has_text = true, p.needs_ocr = false, "
+        "p.ocr_agent = $aid, p.ocr_model = $m, p.ocr_confidence = $conf",
+        params={
+            "pid": page_id, "md": markdown, "aid": agent_id,
+            "m": model, "conf": confidence if confidence is not None else -1.0,
+        },
+    )
+
+    if not markdown:
+        return {"page_id": page_id, "chunks_added": 0}
+
+    # Chunk + insert
+    chunks = chunk_page(markdown)
+    chunk_rows: list[dict[str, Any]] = []
+    for ch in chunks:
+        cid = f"{doc_id}#p{page_number}#c{ch.chunk_index}"
+        chunk_rows.append({
+            "id": cid,
+            "title": (ch.text[:80] + "…") if ch.text else f"ocr p.{page_number}",
+            "doc_id": doc_id,
+            "page_number": page_number,
+            "page_id": page_id,
+            "chunk_index": ch.chunk_index,
+            CHUNK_TEXT_COL: ch.text,
+            "token_count": ch.token_count,
+            "headings_json": "[]",
+            "status": CHUNK_STATUS_READY,
+            "text_hash": ch.text_hash_value,
+            "view_count": 0,
+            "last_viewed_at": "",
+        })
+    if not chunk_rows:
+        return {"page_id": page_id, "chunks_added": 0}
+
+    store.upsert_nodes(CHUNK, chunk_rows)
+    store.upsert_edges(
+        HAS_CHUNK, [{"src": page_id, "dst": r["id"]} for r in chunk_rows],
+        source_type=PAGE, target_type=CHUNK,
+    )
+    store.upsert_edges(
+        HAS_CHUNK, [{"src": doc_id, "dst": r["id"]} for r in chunk_rows],
+        source_type="Document", target_type=CHUNK,
+    )
+    # Wire NEXT_CHUNK within this page
+    if len(chunk_rows) > 1:
+        store.upsert_edges(
+            NEXT_CHUNK,
+            [{"src": chunk_rows[i]["id"], "dst": chunk_rows[i + 1]["id"]}
+             for i in range(len(chunk_rows) - 1)],
+            source_type=CHUNK, target_type=CHUNK,
+        )
+
+    # Embed
+    vecs = embedder.embed([r[CHUNK_TEXT_COL] for r in chunk_rows])
+    store.add_embeddings(
+        CHUNK, CHUNK_TEXT_COL,
+        {r["id"]: vecs[i] for i, r in enumerate(chunk_rows)},
+    )
+    return {
+        "page_id": page_id, "chunks_added": len(chunk_rows),
+        "agent_id": agent_id, "model": model,
+    }
