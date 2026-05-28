@@ -3,6 +3,17 @@
 from __future__ import annotations
 
 from kglite_docs.corpus import Corpus
+from kglite_docs.errors import (
+    ConcurrencyError,
+    GroundingError,
+    IngestError,
+    InvalidEnumError,
+    KgliteDocsError,
+    MissingSourceError,
+    ReviewConflict,
+    SelfVerificationError,
+    UnsupportedFormatError,
+)
 from kglite_docs.schema import (
     AGENT,
     CHUNK,
@@ -36,6 +47,15 @@ __all__ = [
     "SUMMARY_TEXT_EMB",
     "TAG",
     "VIEW",
+    "ConcurrencyError",
     "Corpus",
+    "GroundingError",
+    "IngestError",
+    "InvalidEnumError",
+    "KgliteDocsError",
+    "MissingSourceError",
+    "ReviewConflict",
+    "SelfVerificationError",
+    "UnsupportedFormatError",
     "__version__",
 ]

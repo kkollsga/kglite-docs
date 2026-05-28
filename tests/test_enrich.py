@@ -27,9 +27,10 @@ def test_add_summary_returns_id_and_stores(corpus: Corpus, tmp_path: Path) -> No
 
 
 def test_self_verification_rejected(corpus: Corpus, tmp_path: Path) -> None:
+    from kglite_docs.errors import SelfVerificationError
     cid = _ingest_md(corpus, tmp_path)
     sid = corpus.add_summary(cid, "x", agent_id="alice")
-    with pytest.raises(PermissionError):
+    with pytest.raises(SelfVerificationError):
         corpus.verify_summary(sid, verdict="verified", verifier_agent_id="alice")
 
 

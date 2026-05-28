@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from kglite_docs.activity import register_agent
+from kglite_docs.errors import InvalidEnumError, SelfVerificationError
 from kglite_docs.ingest.hashing import combined_hash, text_hash
 from kglite_docs.schema import (
     AGENT,
@@ -80,10 +81,12 @@ def add_summary(
     tags: Iterable[str] = (),
 ) -> str:
     if depth not in VALID_DEPTHS:
-        raise ValueError(f"invalid depth: {depth!r} (expected one of {sorted(VALID_DEPTHS)})")
+        raise InvalidEnumError(
+            f"invalid depth: {depth!r} (expected one of {sorted(VALID_DEPTHS)})"
+        )
     text = text.strip()
     if not text:
-        raise ValueError("summary text must be non-empty")
+        raise InvalidEnumError("summary text must be non-empty")
 
     register_agent(store, agent_id=agent_id)
     sid = str(uuid.uuid4())
@@ -140,18 +143,20 @@ def verify_summary(
     notes: str = "",
 ) -> dict[str, Any]:
     if verdict not in VALID_VERDICTS:
-        raise ValueError(f"invalid verdict: {verdict!r} (expected one of {sorted(VALID_VERDICTS)})")
+        raise InvalidEnumError(
+            f"invalid verdict: {verdict!r} (expected one of {sorted(VALID_VERDICTS)})"
+        )
     # Self-verification guard
     author_df = _df_dicts(store.cypher(
         "MATCH (a:Agent)-[:AUTHORED]->(s:Summary {id: $sid}) RETURN a.id AS id",
         params={"sid": summary_id},
     ))
     if not author_df:
-        raise ValueError(f"summary not found: {summary_id}")
+        raise InvalidEnumError(f"summary not found: {summary_id}")
     author_id = author_df[0]["id"]
     if author_id == verifier_agent_id:
-        raise PermissionError(
-            f"self-verification rejected: agent {verifier_agent_id!r} authored summary {summary_id}"
+        raise SelfVerificationError(
+            f"agent {verifier_agent_id!r} can't verify summary {summary_id} — they authored it"
         )
 
     register_agent(store, agent_id=verifier_agent_id)

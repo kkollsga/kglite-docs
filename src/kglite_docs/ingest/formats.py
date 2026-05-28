@@ -38,11 +38,15 @@ def detect_format(path: str | Path) -> str:
 
 def parse_document(path: str | Path, *, format: str | None = None) -> list[PageContent]:
     """Dispatch to the right format-specific parser."""
+    from kglite_docs.errors import UnsupportedFormatError
     path = Path(path)
     fmt = (format or detect_format(path)).lower()
     parser = _PARSERS.get(fmt)
     if parser is None:
-        raise ValueError(f"unsupported format: {fmt!r} (file {path})")
+        raise UnsupportedFormatError(
+            f"unsupported format: {fmt!r} (file {path}). "
+            f"Supported: {sorted(SUPPORTED_FORMATS)}"
+        )
     return parser(path)
 
 

@@ -12,7 +12,10 @@ import base64
 from pathlib import Path
 from typing import Any
 
+from pathlib import Path
+
 from kglite_docs.activity import register_agent
+from kglite_docs.errors import InvalidEnumError, MissingSourceError
 from kglite_docs.ingest.chunker import chunk_page
 from kglite_docs.ingest.hashing import text_hash
 from kglite_docs.ingest.parser import render_page_png
@@ -127,8 +130,16 @@ def list_pending_ocr(
     ))
     if include_images:
         for r in rows:
+            doc_path = r.get("doc_path") or ""
+            if not doc_path or not Path(doc_path).exists():
+                r["image_b64"] = ""
+                r["image_error"] = (
+                    f"source file missing for doc {r['doc_id'][:18]}…: "
+                    f"{doc_path or '<no path recorded>'}"
+                )
+                continue
             try:
-                png = render_page_png(r["doc_path"], int(r["page_number"]), dpi=dpi)
+                png = render_page_png(doc_path, int(r["page_number"]), dpi=dpi)
                 r["image_b64"] = base64.b64encode(png).decode("ascii")
                 r["image_mime"] = "image/png"
             except Exception as exc:  # pragma: no cover
@@ -161,7 +172,7 @@ def submit_ocr(
         params={"id": page_id},
     ))
     if not page_rows:
-        raise ValueError(f"page not found: {page_id}")
+        raise InvalidEnumError(f"page not found: {page_id}")
     doc_id = page_rows[0]["doc_id"]
     page_number = int(page_rows[0]["page_number"])
 

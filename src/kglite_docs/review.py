@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kglite_docs.activity import register_agent
+from kglite_docs.errors import InvalidEnumError, ReviewConflict
 from kglite_docs.schema import (
     AGENT,
     AUTHORED,
@@ -58,10 +59,6 @@ _claim_lock = threading.Lock()
 _VALID_COMPLETION_STATUSES = {
     REVIEW_REVIEWED, REVIEW_NEEDS_REVISION, REVIEW_REJECTED,
 }
-
-
-class ReviewConflict(Exception):
-    """Raised when a claim or complete operation conflicts with current state."""
 
 
 def _now() -> str:
@@ -265,7 +262,7 @@ def complete(
     - `tags`: tag names to apply to the *target* chunk (only when target is Chunk).
     """
     if verdict not in _VALID_COMPLETION_STATUSES:
-        raise ValueError(
+        raise InvalidEnumError(
             f"invalid verdict {verdict!r}; expected one of {sorted(_VALID_COMPLETION_STATUSES)}"
         )
     status, claimer = _current_state(store, ticket_id)

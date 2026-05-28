@@ -61,11 +61,12 @@ def test_parse_html_to_markdown_pages(tmp_path: Path) -> None:
 
 
 def test_unsupported_format_raises(tmp_path: Path) -> None:
+    from kglite_docs.errors import UnsupportedFormatError
     f = tmp_path / "x.rtf"
     f.write_text("never indexed", encoding="utf-8")
     try:
         parse_document(f)
-    except ValueError as e:
+    except UnsupportedFormatError as e:
         assert "unsupported" in str(e).lower()
     else:
-        raise AssertionError("expected ValueError for unsupported format")
+        raise AssertionError("expected UnsupportedFormatError")
