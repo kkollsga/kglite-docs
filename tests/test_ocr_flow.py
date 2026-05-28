@@ -58,6 +58,66 @@ def test_submit_ocr_replaces_needs_ocr_chunks(corpus: Corpus, tmp_path: Path) ->
     assert hits
 
 
+def test_ocr_status_empty_corpus(corpus: Corpus) -> None:
+    s = corpus.ocr_status()
+    assert s["total_pages"] == 0
+    assert s["pending_pages"] == 0
+    assert s["documents"] == []
+
+
+def test_ocr_status_mixed(corpus: Corpus, tmp_path: Path) -> None:
+    from PIL import Image
+    # One image (needs OCR)
+    img = tmp_path / "scan.png"
+    Image.new("RGB", (32, 32)).save(img)
+    corpus.ingest(img)
+    # One markdown (no OCR needed)
+    md = tmp_path / "notes.md"
+    md.write_text("# Notes\n\ncontent\n", encoding="utf-8")
+    corpus.ingest(md)
+
+    s = corpus.ocr_status()
+    assert s["documents_total"] == 2
+    assert s["documents_with_pending"] == 1
+    assert s["pending_pages"] == 1
+    assert s["ready_pages"] >= 1
+    # The pending doc should sort to the front
+    assert s["documents"][0]["pending"] == 1
+    assert s["documents"][0]["pending_fraction"] == 1.0
+
+
+def test_ocr_status_scoped_to_doc(corpus: Corpus, tmp_path: Path) -> None:
+    from PIL import Image
+    img = tmp_path / "a.png"
+    Image.new("RGB", (32, 32)).save(img)
+    r = corpus.ingest(img)
+    other = tmp_path / "b.md"
+    other.write_text("# B\n\nnothing\n", encoding="utf-8")
+    corpus.ingest(other)
+
+    s = corpus.ocr_status(doc_id=r.doc_id)
+    assert s["documents_total"] == 1
+    assert s["documents"][0]["doc_id"] == r.doc_id
+    assert s["pending_pages"] == 1
+
+
+def test_ocr_status_flips_after_submit(corpus: Corpus, tmp_path: Path) -> None:
+    from PIL import Image
+    img = tmp_path / "x.png"
+    Image.new("RGB", (32, 32)).save(img)
+    corpus.ingest(img)
+    pre = corpus.ocr_status()
+    assert pre["pending_pages"] == 1
+
+    pending = corpus.list_pending_ocr(include_images=False)
+    corpus.submit_ocr(pending[0]["page_id"], "# transcribed\n\ntext\n",
+                      agent_id="agent-x")
+
+    post = corpus.ocr_status()
+    assert post["pending_pages"] == 0
+    assert post["documents_with_pending"] == 0
+
+
 def test_list_pending_ocr_excludes_images_by_request(corpus: Corpus, tmp_path: Path) -> None:
     from PIL import Image
     img_path = tmp_path / "p.png"

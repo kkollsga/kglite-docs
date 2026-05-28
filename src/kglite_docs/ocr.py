@@ -31,6 +31,80 @@ from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts  # noqa: E402
 
 
+def ocr_status(
+    store: Store,
+    *,
+    doc_id: str | None = None,
+) -> dict[str, Any]:
+    """Per-document OCR coverage summary plus corpus-wide totals.
+
+    Returns::
+
+        {
+          "total_pages": int,
+          "ready_pages": int,
+          "pending_pages": int,
+          "documents_total": int,
+          "documents_with_pending": int,
+          "documents": [
+            {
+              "doc_id": ..., "title": ..., "format": ...,
+              "pages": int, "ready": int, "pending": int,
+              "pending_fraction": float,  # 0.0 = fully OCR'd, 1.0 = entirely unread
+            },
+            ...
+          ],
+        }
+
+    Ordered with documents that still need work first. Pass `doc_id` to
+    restrict to a single document; the corpus-wide totals still reflect
+    the whole graph so you can sanity-check.
+    """
+    where = ""
+    params: dict[str, Any] = {}
+    if doc_id:
+        where = "WHERE d.id = $doc_id"
+        params["doc_id"] = doc_id
+    rows = _df_dicts(store.cypher(
+        f"""
+        MATCH (d:Document)
+        {where}
+        OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page)
+        WITH d, count(p) AS pages,
+             sum(CASE WHEN p.needs_ocr = true THEN 1 ELSE 0 END) AS pending
+        RETURN d.id AS doc_id, d.title AS title, d.format AS format,
+               pages, pending
+        ORDER BY pending DESC, d.title ASC
+        """,
+        params=params,
+    ))
+    documents: list[dict[str, Any]] = []
+    total_pages = 0
+    total_pending = 0
+    for r in rows:
+        pages = int(r.get("pages") or 0)
+        pending = int(r.get("pending") or 0)
+        documents.append({
+            "doc_id": r["doc_id"],
+            "title": r.get("title"),
+            "format": r.get("format"),
+            "pages": pages,
+            "ready": pages - pending,
+            "pending": pending,
+            "pending_fraction": (pending / pages) if pages else 0.0,
+        })
+        total_pages += pages
+        total_pending += pending
+    return {
+        "total_pages": total_pages,
+        "ready_pages": total_pages - total_pending,
+        "pending_pages": total_pending,
+        "documents_total": len(documents),
+        "documents_with_pending": sum(1 for d in documents if d["pending"] > 0),
+        "documents": documents,
+    }
+
+
 def list_pending_ocr(
     store: Store,
     *,

@@ -412,6 +412,12 @@ class Corpus:
 
     # ─── ocr ──────────────────────────────────────────────────────────────
 
+    def ocr_status(self, *, doc_id: str | None = None) -> dict[str, Any]:
+        """Coverage summary: which documents have un-OCR'd pages, and
+        what fraction of the corpus is still pending. Pass `doc_id` to
+        narrow to one document."""
+        return ocr_mod.ocr_status(self._store, doc_id=doc_id)
+
     def list_pending_ocr(
         self, *, doc_id: str | None = None, limit: int = 20,
         include_images: bool = True, dpi: int = 200,

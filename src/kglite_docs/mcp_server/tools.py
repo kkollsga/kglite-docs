@@ -170,6 +170,12 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         return corpus.record_view(chunk_id, agent_id, context=context)
 
     @app.tool()
+    def ocr_status(doc_id: str | None = None) -> dict[str, Any]:
+        """Per-document OCR coverage + corpus-wide totals (ready vs.
+        pending pages). Pass `doc_id` to scope to one document."""
+        return corpus.ocr_status(doc_id=doc_id)
+
+    @app.tool()
     def list_pending_ocr(
         doc_id: str | None = None, limit: int = 20,
         include_images: bool = True, dpi: int = 200,

@@ -71,6 +71,23 @@ def _cmd_cluster(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ocr_status(args: argparse.Namespace) -> int:
+    corpus = Corpus.open(args.db)
+    status = corpus.ocr_status(doc_id=args.doc or None)
+    print(
+        f"{status['pending_pages']}/{status['total_pages']} pages pending OCR "
+        f"({status['documents_with_pending']}/{status['documents_total']} docs)"
+    )
+    if args.verbose:
+        for d in status["documents"]:
+            marker = "!" if d["pending"] else " "
+            print(
+                f"  {marker} {d['pending']:>3}/{d['pages']:<3} {d['format']:<5} "
+                f"{d['title']}  ({d['doc_id'][:18]}…)"
+            )
+    return 0 if status["pending_pages"] == 0 else 1
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     corpus = Corpus.open(args.db)
     if args.kind == "doc":
@@ -111,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     pc.add_argument("--db", required=True)
     pc.add_argument("--algorithm", default="louvain")
     pc.set_defaults(func=_cmd_cluster)
+
+    po = sp.add_parser("ocr-status", help="OCR coverage summary across the corpus")
+    po.add_argument("--db", required=True)
+    po.add_argument("--doc", default="", help="Scope to one document id")
+    po.add_argument("-v", "--verbose", action="store_true", help="Per-document detail")
+    po.set_defaults(func=_cmd_ocr_status)
 
     psh = sp.add_parser("show", help="Show a document or chunk by id")
     psh.add_argument("kind", choices=["doc", "chunk"])
