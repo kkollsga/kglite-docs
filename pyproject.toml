@@ -1,10 +1,12 @@
 [build-system]
-requires = ["hatchling>=1.25", "hatch-vcs>=0.4"]
+requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
 name = "kglite-docs"
-dynamic = ["version"]
+# Bump this and push to main — the release.yml workflow checks PyPI
+# and publishes if the version is new. No git tag needed.
+version = "0.0.1"
 description = "Agent-first PDF knowledge base — chunk, embed, cluster, enrich, and serve over MCP. Built on kglite + bge-m3."
 readme = "README.md"
 license = "MIT"
@@ -66,13 +68,6 @@ kglite-docs-mcp = "kglite_docs.mcp_server.__main__:main"
 Homepage = "https://github.com/kkollsga/kglite-docs"
 Repository = "https://github.com/kkollsga/kglite-docs"
 Issues = "https://github.com/kkollsga/kglite-docs/issues"
-
-[tool.hatch.version]
-source = "vcs"
-fallback-version = "0.0.0+unknown"
-
-[tool.hatch.build.hooks.vcs]
-version-file = "src/kglite_docs/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kglite_docs"]

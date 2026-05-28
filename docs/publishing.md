@@ -68,18 +68,23 @@ That's the entire one-time setup.
 
 ## 4. Cut a release
 
-When you're ready to ship a version:
+No tag needed — version bumps are driven by `pyproject.toml`. To cut a release:
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+1. **Bump the version**:
+   ```toml
+   # pyproject.toml
+   version = "0.0.2"
+   ```
+2. **Add a changelog entry** in `CHANGELOG.md` under `## [0.0.2] — YYYY-MM-DD`. The release workflow extracts this block and uses it as the GitHub Release body.
+3. **Commit + push** to `main`.
 
-The `release.yml` workflow fires automatically and:
+The `release.yml` workflow then:
 
-1. Builds `sdist` + `wheel` (pure-Python, single artifact across OSes).
-2. Publishes to **PyPI** via trusted publisher.
-3. Creates a **GitHub Release** with auto-generated notes from commits since the previous tag.
+1. Waits for `ci.yml` to pass (won't even start if CI fails).
+2. Reads the `version` from `pyproject.toml` and queries `https://pypi.org/pypi/kglite-docs/<version>/json`. HTTP 404 → publish; anything else → skip cleanly.
+3. Builds `sdist` + `wheel` (pure-Python, single artifact across OSes).
+4. Publishes to **PyPI** via trusted publisher (with `skip-existing: true` as a belt-and-suspenders).
+5. Creates a **GitHub Release** at `v<version>` with the CHANGELOG entry as the body. Falls back to auto-generated commit-based notes if the version isn't in `CHANGELOG.md`.
 
 The CI matrix (`ci.yml` on every push) already exercises the package on macOS + Linux × Python 3.10–3.13, so the build → publish path doesn't need a TestPyPI dry-run on top.
 

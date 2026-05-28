@@ -1,30 +1,73 @@
 name: release
 
+# Triggered after CI completes on `main` (so we never publish a broken
+# version), or manually via the Actions tab. The workflow checks PyPI
+# for the version in pyproject.toml and only publishes if it's new.
+#
+# Usage: bump the `version = "..."` line in pyproject.toml, commit,
+# push to main. CI runs, then this workflow runs, sees the new version
+# isn't on PyPI, builds, publishes, and tags a GitHub release.
+
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      ref:
-        description: Tag or commit to release
-        required: true
 
 permissions:
-  contents: write          # for the GitHub release notes
+  contents: write          # for the GitHub release
   id-token: write          # for PyPI Trusted Publishing (OIDC)
 
 jobs:
+  version-check:
+    name: Check if pyproject version is on PyPI
+    runs-on: ubuntu-latest
+    # Don't even start if CI failed.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    outputs:
+      should_publish: ${{ steps.check.outputs.should_publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from pyproject.toml
+        id: read
+        run: |
+          VERSION=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "pyproject.toml version: $VERSION"
+
+      - name: Check PyPI for this version
+        id: check
+        env:
+          VERSION: ${{ steps.read.outputs.version }}
+        run: |
+          # 404 → version not published yet → ship it
+          # 200 → already there → skip
+          # anything else (network glitch, 5xx) → fail safe to don't-publish
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -A "kglite-docs-ci/${VERSION} (https://github.com/kkollsga/kglite-docs)" \
+            "https://pypi.org/pypi/kglite-docs/${VERSION}/json")
+          echo "PyPI returned HTTP $STATUS for version $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [ "$STATUS" = "404" ]; then
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          fi
+
   build:
     name: Build sdist + wheel
+    needs: [version-check]
+    if: needs.version-check.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # hatch-vcs needs full history for version-from-tag
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
@@ -33,17 +76,18 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: List dist
+        run: ls -la dist/
+
+      - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
 
   publish-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: [version-check, build]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     environment:
       name: pypi
       url: https://pypi.org/project/kglite-docs/
@@ -55,24 +99,48 @@ jobs:
 
       - name: Publish to PyPI (trusted publisher)
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
   github-release:
     name: Create GitHub release
-    needs: publish-pypi
+    needs: [version-check, publish-pypi]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
 
-      - name: Create release
+      - name: Extract changelog for this version
+        id: changelog
+        env:
+          VERSION: ${{ needs.version-check.outputs.version }}
+        run: |
+          # Pull the section between "## [VERSION]" and the next "## ["
+          NOTES=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            echo "No changelog entry for $VERSION — falling back to auto-generated"
+            echo "has_notes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_notes=true" >> $GITHUB_OUTPUT
+            printf '%s' "$NOTES" > /tmp/release_notes.md
+          fi
+
+      - name: Create release (with changelog body)
+        if: steps.changelog.outputs.has_notes == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: /tmp/release_notes.md
+          tag_name: v${{ needs.version-check.outputs.version }}
+
+      - name: Create release (auto-generated body)
+        if: steps.changelog.outputs.has_notes != 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          tag_name: v${{ needs.version-check.outputs.version }}

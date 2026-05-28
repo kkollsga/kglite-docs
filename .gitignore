@@ -24,8 +24,6 @@ htmlcov/
 .coverage
 coverage.xml
 
-# Hatch
-src/kglite_docs/_version.py
 
 # Local artifacts
 *.kgl
