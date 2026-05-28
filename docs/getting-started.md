@@ -5,10 +5,10 @@ A 10-minute walkthrough from `pip install` to "I'm using this from an agent."
 ## 1. Install
 
 ```bash
-pip install "kglite-docs[mcp]"
+pip install kglite-docs
 ```
 
-This pulls in everything the library needs: storage (`kglite`), multi-format parsers (`pymupdf4llm`, `python-docx`, `python-pptx`, `markdownify`), the bge-m3 inference stack (`tokenizers`, `onnxruntime`, `huggingface-hub`), and the MCP framework (`mcp`, `mcp-methods`).
+This pulls in everything the library needs: storage (`kglite`), multi-format parsers (`pymupdf4llm`, `python-docx`, `python-pptx`, `markdownify`), the bge-m3 inference stack (`tokenizers`, `onnxruntime`, `huggingface-hub`), and the MCP framework (`mcp`, `mcp-methods`). All required, all in one install.
 
 On first use the bge-m3 ONNX weights (~2 GB) are pulled from HuggingFace Hub into `~/.cache/fastembed/`. If you already have them cached elsewhere, set `HF_HUB_CACHE=/path/to/cache` before running anything.
 

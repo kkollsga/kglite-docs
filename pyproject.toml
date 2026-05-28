@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "kglite-docs"
 # Bump this and push to main — the release.yml workflow checks PyPI
 # and publishes if the version is new. No git tag needed.
-version = "0.0.1"
+version = "0.0.2"
 description = "Agent-first PDF knowledge base — chunk, embed, cluster, enrich, and serve over MCP. Built on kglite + bge-m3."
 readme = "README.md"
 license = "MIT"
@@ -30,6 +30,8 @@ classifiers = [
 ]
 dependencies = [
     "kglite>=0.10.4",
+    "mcp>=1.0",
+    "mcp-methods>=0.3",
     "pymupdf4llm>=0.0.17",
     "pymupdf>=1.24",
     "tokenizers>=0.20",
@@ -44,10 +46,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = [
-    "mcp>=1.0",
-    "mcp-methods>=0.3",
-]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",

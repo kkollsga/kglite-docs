@@ -6,7 +6,7 @@
 git clone https://github.com/kkollsga/kglite-docs
 cd kglite-docs
 uv venv --python 3.12
-uv pip install -e ".[mcp,dev]"
+uv pip install -e ".[dev]"
 ```
 
 The bge-m3 ONNX weights (~2 GB) download on first test run that exercises the real embedder. If you have them cached at a non-default path:

@@ -20,7 +20,5 @@ python:
       path: .
       extra_requirements:
         - docs
-        # `mcp` so mkdocstrings can introspect the MCP module too
-        - mcp
 
 formats: []   # no PDF/ePub for now; mkdocs-material handles search well enough

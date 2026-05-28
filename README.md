@@ -26,7 +26,7 @@ Most "RAG libraries" hand the agent `search(query) → list[chunk]` and stop. kg
 ## Install
 
 ```bash
-pip install "kglite-docs[mcp]"
+pip install kglite-docs
 ```
 
 ## 30 seconds of Python

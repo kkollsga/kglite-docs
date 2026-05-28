@@ -7,6 +7,25 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.2] — 2026-05-28
+
+### Changed
+
+- **`mcp` + `mcp-methods` moved into core dependencies.** They were
+  previously gated behind the `[mcp]` extra, but `mcp` was already
+  pulled in transitively by `kglite` anyway, and `mcp-methods` is only
+  ~17 MB — rounding error against `pymupdf` (30 MB) and `onnxruntime`
+  (80 MB) which are core. The MCP server is the headline feature;
+  gating it behind an extra was friction with no real savings.
+
+  Install is now just `pip install kglite-docs`. Old install commands
+  with `[mcp]` keep working (pip warns, doesn't fail).
+
+### CI / tooling
+
+- Bumped all `actions/*` to versions supporting Node.js 24 ahead of
+  GitHub's 2026-06-02 deprecation of Node 20.
+
 ## [0.0.1] — 2026-05-28
 
 First public alpha. The core agent-first PDF knowledge-base API is in
@@ -81,7 +100,7 @@ integration tests; a real end-to-end Sonnet workflow demo is included.
 
 - Requires `kglite>=0.10.4`. (Earlier 0.10.3 hit two upstream bugs we
   filed; both fixed in 0.10.4 — see "Bug workarounds peeled" below.)
-- Requires `mcp-methods>=0.3` (optional, via the `[mcp]` extra).
+- Requires `mcp-methods>=0.3` (was previously in the `[mcp]` extra; moved to core deps in 0.0.2).
 - bge-m3 ONNX weights download to `~/.cache/fastembed/` on first use
   (~2 GB, one-time). Set `HF_HUB_CACHE` to reuse an existing HF cache.
 
@@ -125,5 +144,6 @@ Filed in the kglite inbox at
   to keep things fast; run locally with the model cached).
 - End-to-end Sonnet workflow demo proves the agent path beyond unit tests.
 
-[Unreleased]: https://github.com/kkollsga/kglite-docs/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/kkollsga/kglite-docs/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.2
 [0.0.1]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.1

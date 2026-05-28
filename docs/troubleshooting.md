@@ -124,7 +124,7 @@ Check that:
    claude mcp add kglite-docs -- kglite-docs-mcp --db /absolute/path/to/kb.kgl
    ```
    Use an *absolute* path — Claude's working directory may not be yours.
-3. The `mcp` extra is installed: `pip install "kglite-docs[mcp]"`.
+3. `kglite-docs` is installed (`mcp` + `mcp-methods` are core deps, no extras needed): `pip install kglite-docs`.
 
 ### MCP search returns hits, but `text` is missing from one of them
 
