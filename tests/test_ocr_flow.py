@@ -118,6 +118,86 @@ def test_ocr_status_flips_after_submit(corpus: Corpus, tmp_path: Path) -> None:
     assert post["documents_with_pending"] == 0
 
 
+def test_ocr_do_cli_end_to_end(tmp_path: Path) -> None:
+    """`kglite-docs ocr-do` should iterate pending pages, call the agent
+    command, and submit each result. Uses a stub 'agent' (`printf`) that
+    just echoes deterministic markdown back so the test doesn't need a
+    real vision model."""
+    from PIL import Image
+
+    from kglite_docs.cli import main as cli_main
+
+    # Build a corpus with one OCR-pending page
+    db = tmp_path / "kb.kgl"
+    img = tmp_path / "scan.png"
+    Image.new("RGB", (32, 32)).save(img)
+    from kglite_docs import Corpus
+    c = Corpus.create(db)
+    c.ingest(img)
+    c.save()
+
+    assert c.ocr_status()["pending_pages"] == 1
+
+    # Stub agent: `printf` outputs predictable markdown. `{image}` is in
+    # the command (CLI validates its presence) and is interpolated to a
+    # real temp path; the stub just ignores it.
+    rc = cli_main([
+        "ocr-do",
+        "--db", str(db),
+        "--agent-cmd",
+        "printf '# Stub OCR\\n\\nimage=%s page=%s' '{image}' '{page}'",
+        "--shell", "yes",
+        "--agent-id", "stub-agent",
+    ])
+    assert rc == 0
+
+    # Reload and verify the page now has chunks instead of needs_ocr
+    c2 = Corpus.open(db)
+    assert c2.ocr_status()["pending_pages"] == 0
+    # The chunker treats `#` as a heading (goes into headings_json, not
+    # into text). The body of the stub agent's output lives in c.text.
+    chunks = c2.cypher(
+        "MATCH (c:Chunk) WHERE c.text CONTAINS 'page=1' RETURN c.id AS id, c.text AS t"
+    ).to_list()
+    assert chunks, "OCR markdown didn't land as searchable chunks"
+
+
+def test_ocr_do_dry_run_does_nothing(tmp_path: Path) -> None:
+    from PIL import Image
+    from kglite_docs.cli import main as cli_main
+    db = tmp_path / "kb.kgl"
+    img = tmp_path / "scan.png"
+    Image.new("RGB", (32, 32)).save(img)
+    from kglite_docs import Corpus
+    c = Corpus.create(db); c.ingest(img); c.save()
+    pre = c.ocr_status()["pending_pages"]
+    rc = cli_main([
+        "ocr-do", "--db", str(db),
+        "--agent-cmd", "printf 'should not run for {image}'",
+        "--dry-run",
+    ])
+    assert rc == 0
+    c2 = Corpus.open(db)
+    assert c2.ocr_status()["pending_pages"] == pre
+
+
+def test_ocr_do_missing_image_placeholder_errors(tmp_path: Path, capsys) -> None:
+    from PIL import Image
+    from kglite_docs.cli import main as cli_main
+    db = tmp_path / "kb.kgl"
+    img = tmp_path / "scan.png"
+    Image.new("RGB", (32, 32)).save(img)
+    from kglite_docs import Corpus
+    c = Corpus.create(db); c.ingest(img); c.save()
+    rc = cli_main([
+        "ocr-do", "--db", str(db),
+        "--agent-cmd", "printf 'no placeholder used'",
+    ])
+    assert rc == 2  # validation error
+    err = capsys.readouterr().err
+    assert "{image}" in err
+
+
 def test_list_pending_ocr_excludes_images_by_request(corpus: Corpus, tmp_path: Path) -> None:
     from PIL import Image
     img_path = tmp_path / "p.png"

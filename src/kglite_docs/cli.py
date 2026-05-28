@@ -71,6 +71,113 @@ def _cmd_cluster(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ocr_do(args: argparse.Namespace) -> int:
+    """Run an agent command across every page flagged `needs_ocr=True`.
+
+    The command may use these placeholders:
+
+    - ``{image}`` — path to a freshly-rendered PNG of the page
+    - ``{page}`` — 1-based page number
+    - ``{doc_title}`` — document title
+    - ``{doc_id}`` — document id
+
+    The command's stdout is taken as the OCR markdown and passed to
+    `submit_ocr`. Exit code != 0 (or empty stdout) on a page → that page
+    is skipped and logged. Pages are processed serially in v1.
+    """
+    import shlex
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    corpus = Corpus.open(args.db)
+    pending = corpus.list_pending_ocr(
+        doc_id=args.doc or None,
+        limit=args.limit,
+        include_images=False,  # we render to a temp file ourselves
+        dpi=args.dpi,
+    )
+    if not pending:
+        print("nothing to do — no pages flagged needs_ocr=True")
+        return 0
+
+    print(f"{len(pending)} pages pending across {len({p['doc_id'] for p in pending})} docs")
+    if args.dry_run:
+        for p in pending:
+            print(f"  would process p.{p['page_number']} of {p['doc_title']}  ({p['page_id']})")
+        return 0
+
+    if "{image}" not in args.agent_cmd:
+        print(
+            "ERROR: --agent-cmd must contain the {image} placeholder so the\n"
+            "       page render can be passed to your vision agent.",
+            file=sys.stderr,
+        )
+        return 2
+
+    from kglite_docs.ingest.formats import render_page_image
+    succeeded = failed = 0
+    for p in pending:
+        # Render the page to a temp PNG using whatever path was stored on
+        # the Document node when it was ingested.
+        try:
+            doc_path = corpus.cypher(
+                "MATCH (d:Document {id: $id}) RETURN d.path AS path",
+                params={"id": p["doc_id"]},
+            ).to_list()[0]["path"]
+            png = render_page_image(doc_path, int(p["page_number"]), dpi=args.dpi)
+        except Exception as exc:
+            print(f"  ✗ p.{p['page_number']} {p['page_id']}: render failed — {exc}", file=sys.stderr)
+            failed += 1
+            continue
+
+        with tempfile.NamedTemporaryFile("wb", suffix=".png", delete=False) as fh:
+            fh.write(png)
+            image_path = Path(fh.name)
+        try:
+            cmd = args.agent_cmd.format(
+                image=str(image_path),
+                page=p["page_number"],
+                doc_title=p.get("doc_title", ""),
+                doc_id=p["doc_id"],
+            )
+            try:
+                proc = subprocess.run(
+                    shlex.split(cmd) if args.shell != "yes" else cmd,
+                    shell=(args.shell == "yes"),
+                    capture_output=True, text=True,
+                    timeout=args.timeout, check=False,
+                )
+            except subprocess.TimeoutExpired:
+                print(f"  ✗ p.{p['page_number']} {p['page_id']}: agent timed out (>{args.timeout}s)", file=sys.stderr)
+                failed += 1
+                continue
+            if proc.returncode != 0:
+                stderr_preview = (proc.stderr or "")[:160].replace("\n", " ")
+                print(f"  ✗ p.{p['page_number']} {p['page_id']}: agent exited {proc.returncode} — {stderr_preview}", file=sys.stderr)
+                failed += 1
+                continue
+            md = (proc.stdout or "").strip()
+            if not md:
+                print(f"  ✗ p.{p['page_number']} {p['page_id']}: empty agent output", file=sys.stderr)
+                failed += 1
+                continue
+            corpus.submit_ocr(
+                p["page_id"], md,
+                agent_id=args.agent_id, model=args.model,
+            )
+            print(f"  ✓ p.{p['page_number']} of {p.get('doc_title','')}  ({len(md)} chars)")
+            succeeded += 1
+        finally:
+            image_path.unlink(missing_ok=True)
+
+    corpus.save(args.db)
+    total = succeeded + failed
+    print(f"\nfinished: {succeeded}/{total} pages OCR'd, {failed} failures")
+    return 0 if failed == 0 else 1
+
+
 def _cmd_ocr_status(args: argparse.Namespace) -> int:
     corpus = Corpus.open(args.db)
     status = corpus.ocr_status(doc_id=args.doc or None)
@@ -134,6 +241,41 @@ def main(argv: list[str] | None = None) -> int:
     po.add_argument("--doc", default="", help="Scope to one document id")
     po.add_argument("-v", "--verbose", action="store_true", help="Per-document detail")
     po.set_defaults(func=_cmd_ocr_status)
+
+    pdo = sp.add_parser(
+        "ocr-do",
+        help="Run an agent command across every page flagged needs_ocr=True",
+        description=(
+            "Iterate over pages that need OCR. For each, render the page to a "
+            "PNG, run the supplied agent command (must include the {image} "
+            "placeholder), and submit the command's stdout back as the page's "
+            "markdown. Pages are processed serially."
+        ),
+    )
+    pdo.add_argument("--db", required=True)
+    pdo.add_argument(
+        "--agent-cmd", required=True,
+        help='Command template — must contain {image}. Other placeholders: '
+             '{page}, {doc_title}, {doc_id}. Example: '
+             '\'claude -p --bare --image {image} "Transcribe to markdown"\'',
+    )
+    pdo.add_argument("--agent-id", default="cli-ocr-agent",
+                     help="Agent id recorded on each submission (default: cli-ocr-agent)")
+    pdo.add_argument("--model", default="",
+                     help="Model name to record on each page (informational)")
+    pdo.add_argument("--doc", default="", help="Scope to one document id")
+    pdo.add_argument("--limit", type=int, default=100,
+                     help="Max pages to process this run (default: 100)")
+    pdo.add_argument("--dpi", type=int, default=200,
+                     help="DPI for the page render handed to the agent")
+    pdo.add_argument("--timeout", type=int, default=180,
+                     help="Per-page agent timeout in seconds (default: 180)")
+    pdo.add_argument("--shell", choices=["no", "yes"], default="no",
+                     help='If "yes", run the command through a shell (allows '
+                          'pipes/quoting). Default splits with shlex.')
+    pdo.add_argument("--dry-run", action="store_true",
+                     help="List what would be processed; don't invoke the agent")
+    pdo.set_defaults(func=_cmd_ocr_do)
 
     psh = sp.add_parser("show", help="Show a document or chunk by id")
     psh.add_argument("kind", choices=["doc", "chunk"])
