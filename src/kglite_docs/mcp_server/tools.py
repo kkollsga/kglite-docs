@@ -268,3 +268,94 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
     def export_cluster(cluster_id: str, out_path: str, format: str | None = None) -> str:
         """Export a cluster (members + summaries) to MD / DOCX / PDF."""
         return str(corpus.export_cluster(cluster_id, out_path, format=format))
+
+    # ─── review queue (kanban) ────────────────────────────────────────────
+
+    @app.tool()
+    def enqueue_review(
+        target_id: str, target_kind: str = "Chunk",
+        priority: int = 0, note: str = "", enqueued_by: str = "system",
+    ) -> str:
+        """Add a target node (Chunk/Summary/Document/Page) to the review
+        queue. Returns the ticket id."""
+        return corpus.enqueue_review(
+            target_id, target_kind=target_kind, priority=priority,
+            note=note, enqueued_by=enqueued_by,
+        )
+
+    @app.tool()
+    def enqueue_chunks_for_review(
+        doc_id: str | None = None, status_filter: str | None = "ready",
+        priority: int = 0, enqueued_by: str = "system",
+    ) -> dict[str, Any]:
+        """Bulk-enqueue all chunks (optionally one doc / one status).
+        Skips chunks that already have an open ticket."""
+        return corpus.enqueue_chunks_for_review(
+            doc_id=doc_id, status_filter=status_filter,
+            priority=priority, enqueued_by=enqueued_by,
+        )
+
+    @app.tool()
+    def claim_review(ticket_id: str, agent_id: str) -> dict[str, Any]:
+        """Claim a specific ticket atomically. Fails if not in `new`."""
+        return corpus.claim_review(ticket_id, agent_id=agent_id)
+
+    @app.tool()
+    def claim_next_review(
+        agent_id: str, target_kind: str | None = None,
+        min_priority: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Pull next ticket: highest priority, oldest first. Returns the
+        ticket with the target hydrated, or null when the queue is empty.
+        This is the agent's main entry point — call it in a loop."""
+        return corpus.claim_next_review(
+            agent_id=agent_id, target_kind=target_kind, min_priority=min_priority,
+        )
+
+    @app.tool()
+    def unclaim_review(ticket_id: str, agent_id: str, reason: str = "") -> dict[str, Any]:
+        """Release a claim without a verdict — ticket returns to `new`."""
+        return corpus.unclaim_review(ticket_id, agent_id=agent_id, reason=reason)
+
+    @app.tool()
+    def complete_review(
+        ticket_id: str, agent_id: str,
+        verdict: str = "reviewed",
+        accuracy: float | None = None,
+        authenticity: str | None = None,
+        notes: str = "",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Finish a review with a verdict (reviewed / needs_revision /
+        rejected). Optional accuracy in [0,1] and authenticity verdict.
+        Tags are applied to the target chunk."""
+        return corpus.complete_review(
+            ticket_id, agent_id=agent_id, verdict=verdict,
+            accuracy=accuracy, authenticity=authenticity, notes=notes, tags=tags,
+        )
+
+    @app.tool()
+    def list_review_queue(
+        status: str | None = None, target_kind: str | None = None,
+        agent_id: str | None = None, limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Browse the review board with filters: status (new/in_review/
+        reviewed/needs_revision/rejected), target_kind, claimed-by-agent."""
+        return corpus.list_review_queue(
+            status=status, target_kind=target_kind,
+            agent_id=agent_id, limit=limit,
+        )
+
+    @app.tool()
+    def get_review_ticket(
+        ticket_id: str, with_target: bool = True, with_events: bool = True,
+    ) -> dict[str, Any] | None:
+        """Full ticket detail with hydrated target and full event audit trail."""
+        return corpus.get_review_ticket(
+            ticket_id, with_target=with_target, with_events=with_events,
+        )
+
+    @app.tool()
+    def review_stats() -> dict[str, Any]:
+        """Kanban summary: per-status counts + per-agent in-review load."""
+        return corpus.review_stats()

@@ -18,6 +18,8 @@ CLUSTER: Final = "Cluster"
 AGENT: Final = "Agent"
 VIEW: Final = "View"
 NOTE: Final = "Note"
+REVIEW_TICKET: Final = "ReviewTicket"
+REVIEW_EVENT: Final = "ReviewEvent"
 
 # Edge types
 HAS_PAGE: Final = "HAS_PAGE"
@@ -32,6 +34,22 @@ AUTHORED: Final = "AUTHORED"
 VERIFIED_BY: Final = "VERIFIED_BY"
 VIEWED: Final = "VIEWED"
 ANNOTATED: Final = "ANNOTATED"
+TARGETS: Final = "TARGETS"
+CLAIMED: Final = "CLAIMED"
+REVIEWED: Final = "REVIEWED"
+HAS_REVIEW_EVENT: Final = "HAS_REVIEW_EVENT"
+
+# Review ticket states (event-sourced via ReviewEvent)
+REVIEW_NEW: Final = "new"
+REVIEW_IN_REVIEW: Final = "in_review"
+REVIEW_REVIEWED: Final = "reviewed"
+REVIEW_REJECTED: Final = "rejected"
+REVIEW_NEEDS_REVISION: Final = "needs_revision"
+REVIEW_UNCLAIMED: Final = "unclaimed"  # event type, not a status
+REVIEW_STATES: Final = frozenset({
+    REVIEW_NEW, REVIEW_IN_REVIEW, REVIEW_REVIEWED,
+    REVIEW_REJECTED, REVIEW_NEEDS_REVISION,
+})
 
 # Embedding-store text columns. kglite keys the store as `{text_column}_emb`.
 CHUNK_TEXT_COL: Final = "text"

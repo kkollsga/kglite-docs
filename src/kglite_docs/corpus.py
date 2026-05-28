@@ -16,6 +16,7 @@ from kglite_docs import enrich as enrich_mod
 from kglite_docs import export as export_mod
 from kglite_docs import ocr as ocr_mod
 from kglite_docs import quality as quality_mod
+from kglite_docs import review as review_mod
 from kglite_docs import translate as translate_mod
 from kglite_docs.activity import (
     list_agents as _list_agents,
@@ -571,6 +572,101 @@ class Corpus:
         return export_mod.export_bundle(
             self, items, out_path, format=format, title=title,
         )
+
+    # ─── review queue (kanban) ────────────────────────────────────────────
+
+    def enqueue_review(
+        self, target_id: str, *, target_kind: str = "Chunk",
+        priority: int = 0, note: str = "", enqueued_by: str = "system",
+    ) -> str:
+        """Add a target node (chunk/summary/document/page) to the review
+        queue. Returns the ticket id."""
+        return review_mod.enqueue(
+            self._store, target_id=target_id, target_kind=target_kind,
+            priority=priority, note=note, enqueued_by=enqueued_by,
+        )
+
+    def enqueue_chunks_for_review(
+        self, *, doc_id: str | None = None, status_filter: str | None = "ready",
+        priority: int = 0, enqueued_by: str = "system",
+    ) -> dict[str, Any]:
+        """Bulk-enqueue every chunk (optionally scoped to one document or
+        a Chunk.status filter). Skips chunks that already have a ticket."""
+        return review_mod.enqueue_chunks(
+            self._store, doc_id=doc_id, status_filter=status_filter,
+            priority=priority, enqueued_by=enqueued_by,
+        )
+
+    def claim_review(self, ticket_id: str, *, agent_id: str) -> dict[str, Any]:
+        """Atomically claim a specific ticket. Raises `ReviewConflict` if
+        it's not currently in the `new` state."""
+        return review_mod.claim(
+            self._store, ticket_id=ticket_id, agent_id=agent_id,
+        )
+
+    def claim_next_review(
+        self, *, agent_id: str, target_kind: str | None = None,
+        min_priority: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomic 'pull from the queue': finds the highest-priority `new`
+        ticket and claims it for `agent_id`. Returns the ticket with the
+        target hydrated, or `None` if the queue is empty."""
+        return review_mod.claim_next(
+            self._store, agent_id=agent_id,
+            target_kind=target_kind, min_priority=min_priority,
+        )
+
+    def unclaim_review(
+        self, ticket_id: str, *, agent_id: str, reason: str = "",
+    ) -> dict[str, Any]:
+        """Release a claim without a verdict. Only the current claimer
+        can unclaim."""
+        return review_mod.unclaim(
+            self._store, ticket_id=ticket_id, agent_id=agent_id, reason=reason,
+        )
+
+    def complete_review(
+        self, ticket_id: str, *, agent_id: str,
+        verdict: str = "reviewed",
+        accuracy: float | None = None,
+        authenticity: str | None = None,
+        notes: str = "",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Mark a ticket reviewed. `verdict` is one of
+        `reviewed` / `needs_revision` / `rejected`. Optional `accuracy`
+        (0-1) and `authenticity` capture the agent's judgement. `tags`
+        are applied to the target chunk (only when target_kind=Chunk)."""
+        return review_mod.complete(
+            self._store, ticket_id=ticket_id, agent_id=agent_id,
+            verdict=verdict, accuracy=accuracy, authenticity=authenticity,
+            notes=notes, tags=tags,
+        )
+
+    def list_review_queue(
+        self, *, status: str | None = None,
+        target_kind: str | None = None, agent_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List tickets with their current event-sourced status."""
+        return review_mod.list_queue(
+            self._store, status=status, target_kind=target_kind,
+            agent_id=agent_id, limit=limit,
+        )
+
+    def get_review_ticket(
+        self, ticket_id: str, *, with_target: bool = True, with_events: bool = True,
+    ) -> dict[str, Any] | None:
+        """Full ticket detail including the target node and the
+        immutable event audit trail."""
+        return review_mod.get_ticket(
+            self._store, ticket_id=ticket_id,
+            with_target=with_target, with_events=with_events,
+        )
+
+    def review_stats(self) -> dict[str, Any]:
+        """Kanban board summary: counts per status + per-agent in-review."""
+        return review_mod.stats(self._store)
 
     # ─── cypher escape hatch ──────────────────────────────────────────────
 
