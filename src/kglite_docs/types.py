@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-
 # ─── Literal enums ─────────────────────────────────────────────────────────
 
 #: Verdict an agent assigns when verifying a `Summary`.

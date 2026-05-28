@@ -20,8 +20,8 @@ Supported formats (v0.1):
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pymupdf
 
@@ -126,7 +126,6 @@ def _parse_docx(path: Path) -> list[PageContent]:
     from docx import Document as DocxDocument  # type: ignore
 
     doc = DocxDocument(str(path))
-    blocks: list[str] = []
     current_section: list[str] = []
     sections: list[list[str]] = []
     for para in doc.paragraphs:

@@ -12,12 +12,9 @@ import base64
 from pathlib import Path
 from typing import Any
 
-from pathlib import Path
-
 from kglite_docs.activity import register_agent
-from kglite_docs.errors import InvalidEnumError, MissingSourceError
+from kglite_docs.errors import InvalidEnumError
 from kglite_docs.ingest.chunker import chunk_page
-from kglite_docs.ingest.hashing import text_hash
 from kglite_docs.ingest.parser import render_page_png
 from kglite_docs.schema import (
     CHUNK,
@@ -29,8 +26,6 @@ from kglite_docs.schema import (
     PAGE,
 )
 from kglite_docs.store import Store
-
-
 from kglite_docs.store import rows as _df_dicts  # noqa: E402
 
 

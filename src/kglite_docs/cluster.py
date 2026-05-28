@@ -255,10 +255,7 @@ def most_connected_cluster(store: Store) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-_STOP = frozenset("""
-the of and a to in is it that for as on with by are this be from or an at which not we can has have
-its but they their were also more than into other such these those will would may should could
-""".split())
+_STOP = frozenset(["the", "of", "and", "a", "to", "in", "is", "it", "that", "for", "as", "on", "with", "by", "are", "this", "be", "from", "or", "an", "at", "which", "not", "we", "can", "has", "have", "its", "but", "they", "their", "were", "also", "more", "than", "into", "other", "such", "these", "those", "will", "would", "may", "should", "could"])
 
 
 def _top_terms(texts: list[str], *, k: int = 10) -> list[tuple[str, int]]:

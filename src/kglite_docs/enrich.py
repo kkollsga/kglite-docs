@@ -13,12 +13,13 @@ Key invariants:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any
 
 from kglite_docs.activity import register_agent
 from kglite_docs.errors import InvalidEnumError, SelfVerificationError
-from kglite_docs.ingest.hashing import combined_hash, text_hash
+from kglite_docs.ingest.hashing import combined_hash
 from kglite_docs.schema import (
     AGENT,
     AUTHORED,

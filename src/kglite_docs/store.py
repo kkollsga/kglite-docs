@@ -9,8 +9,9 @@ Centralising the conversion keeps the call sites readable.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import kglite
 import pandas as pd
@@ -26,12 +27,12 @@ class Store:
     # ─── construction ──────────────────────────────────────────────────────
 
     @classmethod
-    def create(cls, path: str | Path | None = None) -> "Store":
+    def create(cls, path: str | Path | None = None) -> Store:
         g = kglite.KnowledgeGraph()
         return cls(g, Path(path) if path else None)
 
     @classmethod
-    def open(cls, path: str | Path) -> "Store":
+    def open(cls, path: str | Path) -> Store:
         p = Path(path)
         g = kglite.load(str(p))
         return cls(g, p)

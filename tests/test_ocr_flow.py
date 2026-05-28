@@ -164,6 +164,7 @@ def test_ocr_do_cli_end_to_end(tmp_path: Path) -> None:
 
 def test_ocr_do_dry_run_does_nothing(tmp_path: Path) -> None:
     from PIL import Image
+
     from kglite_docs.cli import main as cli_main
     db = tmp_path / "kb.kgl"
     img = tmp_path / "scan.png"
@@ -183,6 +184,7 @@ def test_ocr_do_dry_run_does_nothing(tmp_path: Path) -> None:
 
 def test_ocr_do_missing_image_placeholder_errors(tmp_path: Path, capsys) -> None:
     from PIL import Image
+
     from kglite_docs.cli import main as cli_main
     db = tmp_path / "kb.kgl"
     img = tmp_path / "scan.png"

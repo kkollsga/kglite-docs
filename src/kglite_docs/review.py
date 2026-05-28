@@ -27,6 +27,7 @@ exposed today.
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -46,7 +47,6 @@ from kglite_docs.schema import (
     REVIEW_REJECTED,
     REVIEW_REVIEWED,
     REVIEW_TICKET,
-    REVIEW_UNCLAIMED,
     REVIEWED,
     TARGETS,
 )
@@ -288,11 +288,9 @@ def complete(
     target_id, target_kind = _ticket_target(store, ticket_id)
     if target_kind == "Chunk" and tags:
         for t in tags:
-            try:
+            with contextlib.suppress(Exception):
                 tag_chunk(store, chunk_id=target_id, tag_name=t,
                           kind="review", agent_id=agent_id)
-            except Exception:
-                pass
     return {
         "ticket_id": ticket_id, "status": verdict, "completed_by": agent_id,
         "event_id": eid, "accuracy": accuracy, "authenticity": authenticity,

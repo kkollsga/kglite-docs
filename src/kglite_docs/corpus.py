@@ -7,9 +7,11 @@ and agent users see the same vocabulary.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterable
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Iterable
+from typing import Any
 
 from kglite_docs import cluster as cluster_mod
 from kglite_docs import context as context_mod
@@ -21,17 +23,28 @@ from kglite_docs import review as review_mod
 from kglite_docs import translate as translate_mod
 from kglite_docs.activity import (
     list_agents as _list_agents,
+)
+from kglite_docs.activity import (
     record_view as _record_view,
+)
+from kglite_docs.activity import (
     register_agent as _register_agent,
 )
-from kglite_docs.embed import BgeM3Embedder, make_embedder
-from kglite_docs.ingest.pipeline import IngestResult, ingest_document as _ingest_doc
-from kglite_docs.schema import CHUNK, CHUNK_TEXT_COL, DOCUMENT
+from kglite_docs.embed import make_embedder
+from kglite_docs.ingest.pipeline import IngestResult
+from kglite_docs.ingest.pipeline import ingest_document as _ingest_doc
+from kglite_docs.schema import CHUNK, CHUNK_TEXT_COL
 from kglite_docs.store import Store
 from kglite_docs.tagging import (
     chunks_by_tag as _chunks_by_tag,
+)
+from kglite_docs.tagging import (
     list_tags as _list_tags,
+)
+from kglite_docs.tagging import (
     tag_chunk as _tag_chunk,
+)
+from kglite_docs.tagging import (
     untag_chunk as _untag_chunk,
 )
 from kglite_docs.types import (
@@ -44,7 +57,6 @@ from kglite_docs.types import (
     DocumentRow,
     ExportFormat,
     GroundingReport,
-    IngestSummary,
     OcrStatus,
     PendingOcrRow,
     ReviewStats,
@@ -79,7 +91,7 @@ class Corpus:
         path: str | Path | None = None,
         *,
         embedder: Any | None = None,
-    ) -> "Corpus":
+    ) -> Corpus:
         return cls(Store.create(path), embedder=embedder)
 
     @classmethod
@@ -88,7 +100,7 @@ class Corpus:
         path: str | Path,
         *,
         embedder: Any | None = None,
-    ) -> "Corpus":
+    ) -> Corpus:
         return cls(Store.open(path), embedder=embedder)
 
     def save(self, path: str | Path | None = None) -> None:
@@ -99,18 +111,14 @@ class Corpus:
         `with` block (which calls this automatically) or to release the
         embedder's ONNX session early on long-lived processes."""
         if self._store.path is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.save()
-            except Exception:
-                pass
         unload = getattr(self._embedder, "unload", None)
         if callable(unload):
-            try:
+            with contextlib.suppress(Exception):
                 unload()
-            except Exception:
-                pass
 
-    def __enter__(self) -> "Corpus":
+    def __enter__(self) -> Corpus:
         return self
 
     def __exit__(
@@ -122,10 +130,8 @@ class Corpus:
         """Save on clean exit; skip the save if an exception is propagating
         so we don't persist a partial mutation."""
         if exc_type is None and self._store.path is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.save()
-            except Exception:
-                pass
 
     @property
     def store(self) -> Store:

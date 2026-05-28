@@ -93,6 +93,15 @@ target-version = "py310"
 select = ["E", "F", "I", "B", "UP", "W", "N", "SIM"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# Scientific code uses `X` for the feature matrix (sklearn convention)
+"src/kglite_docs/cluster.py" = ["N803", "N806"]
+# Public exception API — `ReviewConflict` reads better than
+# `ReviewConflictError` and is already exported through __init__.
+"src/kglite_docs/errors.py" = ["N818"]
+# Tests are allowed semicolons for compact setup lines.
+"tests/*" = ["E702"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = true

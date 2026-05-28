@@ -21,7 +21,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from kglite_docs.schema import CHUNK, CHUNK_TEXT_COL, SUMMARY
+from kglite_docs.schema import CHUNK, CHUNK_TEXT_COL
 from kglite_docs.store import Store
 
 _SENT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -37,7 +37,7 @@ def split_sentences(text: str) -> list[str]:
 
 def _cosine(a: list[float], b: list[float]) -> float:
     import math
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0 or nb == 0:
@@ -100,7 +100,7 @@ def check_grounding(
             missing_idx.append(i)
     if missing_idx:
         new_vecs = embedder.embed([src_texts[i] for i in missing_idx])
-        for i, v in zip(missing_idx, new_vecs):
+        for i, v in zip(missing_idx, new_vecs, strict=False):
             src_vecs[i] = v
 
     sent_vecs = embedder.embed(sentences)
@@ -108,10 +108,10 @@ def check_grounding(
     out: list[dict[str, Any]] = []
     supported = 0
     total_score = 0.0
-    for sent, sv in zip(sentences, sent_vecs):
+    for sent, sv in zip(sentences, sent_vecs, strict=False):
         best_score = -1.0
         best_cid = ""
-        for cid, srcv in zip(src_ids, src_vecs):
+        for cid, srcv in zip(src_ids, src_vecs, strict=False):
             score = _cosine(sv, srcv)  # type: ignore[arg-type]
             if score > best_score:
                 best_score = score

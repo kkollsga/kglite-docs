@@ -12,11 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
-from kglite_docs.embed import BgeM3Embedder
 from kglite_docs.ingest.chunker import Chunk, chunk_page
 from kglite_docs.ingest.formats import detect_format, parse_document
 from kglite_docs.ingest.hashing import file_hash
-from kglite_docs.ingest.parser import PageContent, parse_pdf
+from kglite_docs.ingest.parser import PageContent
 from kglite_docs.schema import (
     CHUNK,
     CHUNK_STATUS_EMPTY,
@@ -29,7 +28,8 @@ from kglite_docs.schema import (
     NEXT_CHUNK,
     PAGE,
 )
-from kglite_docs.store import Store, rows as _rows
+from kglite_docs.store import Store
+from kglite_docs.store import rows as _rows
 
 
 class EmbedderLike(Protocol):
@@ -224,9 +224,9 @@ def ingest_document(
     # Embed and store
     embeddable = [(r["id"], r[CHUNK_TEXT_COL]) for r in chunk_rows if r["status"] == CHUNK_STATUS_READY and r[CHUNK_TEXT_COL]]
     if embeddable:
-        ids, texts = zip(*embeddable)
+        ids, texts = zip(*embeddable, strict=False)
         vecs = embedder.embed(list(texts))
-        store.add_embeddings(CHUNK, CHUNK_TEXT_COL, dict(zip(ids, vecs)))
+        store.add_embeddings(CHUNK, CHUNK_TEXT_COL, dict(zip(ids, vecs, strict=False)))
 
     return IngestResult(
         doc_id=doc_id,

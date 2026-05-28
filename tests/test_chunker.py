@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kglite_docs.ingest.chunker import chunk_page, count_tokens
-
+from kglite_docs.ingest.chunker import chunk_page
 
 pytestmark = pytest.mark.embed  # tokenizer pulls bge-m3 vocab
 

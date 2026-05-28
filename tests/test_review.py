@@ -155,7 +155,7 @@ def test_review_stats_counts_by_status(corpus: Corpus, tmp_path: Path) -> None:
     for cid in ids[:3]:
         corpus.enqueue_review(cid)
     # claim one, complete one, leave one new
-    t_claim = corpus.claim_next_review(agent_id="rev")
+    corpus.claim_next_review(agent_id="rev")
     t_complete = corpus.claim_next_review(agent_id="rev")
     corpus.complete_review(t_complete["ticket_id"], agent_id="rev")
 

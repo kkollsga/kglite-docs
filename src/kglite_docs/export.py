@@ -17,12 +17,12 @@ Markdown source). MD is the source of truth; DOCX/PDF render from it.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _rows
-
 
 # ─── source assembly ──────────────────────────────────────────────────────
 

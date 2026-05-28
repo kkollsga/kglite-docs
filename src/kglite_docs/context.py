@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def compose_context(
-    corpus: "Corpus",
+    corpus: Corpus,
     *,
     query: str,
     max_tokens: int = 4000,

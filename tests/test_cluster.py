@@ -29,7 +29,7 @@ def test_kmeans_clustering_runs(corpus: Corpus, tmp_path: Path) -> None:
 
 def test_get_cluster_returns_members(corpus: Corpus, tmp_path: Path) -> None:
     _ingest_two_topics(corpus, tmp_path)
-    r = corpus.cluster_chunks(algorithm="kmeans", params={"k": 3})
+    corpus.cluster_chunks(algorithm="kmeans", params={"k": 3})
     overview = corpus.cluster_overview()
     assert overview
     cid = overview[0]["id"]

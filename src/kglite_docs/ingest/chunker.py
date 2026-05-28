@@ -14,10 +14,10 @@ actually sees at encode time.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterator
 
 from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer

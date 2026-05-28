@@ -89,10 +89,9 @@ def test_context_manager_does_not_save_on_exception(tmp_path: Path, stub_embedde
     db = tmp_path / "kb.kgl"
     c0 = Corpus.create(db, embedder=stub_embedder); c0.save()
     import pytest
-    with pytest.raises(RuntimeError):
-        with Corpus.open(db, embedder=stub_embedder) as c:
-            c.ingest(text="# X\n\nbody\n", title="t")
-            raise RuntimeError("intentional")
+    with pytest.raises(RuntimeError), Corpus.open(db, embedder=stub_embedder) as c:
+        c.ingest(text="# X\n\nbody\n", title="t")
+        raise RuntimeError("intentional")
     # The doc should NOT have been persisted
     c2 = Corpus.open(db, embedder=stub_embedder)
     assert not any(d["title"] == "t" for d in c2.list_documents())
