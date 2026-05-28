@@ -31,7 +31,7 @@ jobs:
       should_publish: ${{ steps.check.outputs.should_publish }}
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Read version from pyproject.toml
         id: read
@@ -65,7 +65,7 @@ jobs:
     if: needs.version-check.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -79,7 +79,7 @@ jobs:
       - name: List dist
         run: ls -la dist/
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -92,7 +92,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/kglite-docs/
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -107,9 +107,9 @@ jobs:
     needs: [version-check, publish-pypi]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
@@ -131,7 +131,7 @@ jobs:
 
       - name: Create release (with changelog body)
         if: steps.changelog.outputs.has_notes == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body_path: /tmp/release_notes.md
@@ -139,7 +139,7 @@ jobs:
 
       - name: Create release (auto-generated body)
         if: steps.changelog.outputs.has_notes != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true
