@@ -1,0 +1,26 @@
+# Read the Docs configuration
+# https://docs.readthedocs.io/en/stable/config-file/v2.html
+
+version: 2
+
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "3.12"
+
+mkdocs:
+  configuration: mkdocs.yml
+  # Don't fail the build on mkdocs warnings — we want it permissive at
+  # first; we'll flip to fail-on-warning once the API reference is stable.
+  fail_on_warning: false
+
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
+        # `mcp` so mkdocstrings can introspect the MCP module too
+        - mcp
+
+formats: []   # no PDF/ePub for now; mkdocs-material handles search well enough

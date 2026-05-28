@@ -1,6 +1,6 @@
 site_name: kglite-docs
 site_description: Agent-first PDF knowledge base on kglite + bge-m3
-site_url: https://kkollsga.github.io/kglite-docs/
+site_url: https://kglite-docs.readthedocs.io/
 repo_url: https://github.com/kkollsga/kglite-docs
 repo_name: kkollsga/kglite-docs
 edit_uri: edit/main/docs/
