@@ -75,7 +75,7 @@ integration tests; a real end-to-end Sonnet workflow demo is included.
   publishing, troubleshooting, contributing — all in `docs/`.
 - **CI + release.** GitHub Actions workflows for `ruff` + `mypy` +
   `pytest` on Py 3.10–3.13 × macOS/Linux, plus a trusted-publisher
-  PyPI release pipeline with TestPyPI dry-run.
+  PyPI release pipeline triggered on `v*` tags.
 
 ### Dependencies
 

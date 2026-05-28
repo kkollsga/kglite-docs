@@ -13,7 +13,6 @@ You'll also need accounts on:
 
 - **GitHub** (free) — for the repo + Actions
 - **PyPI** (free) — to host the package
-- **TestPyPI** (free) — to dry-run releases before promoting to PyPI
 
 ## 2. Initialise + push the repo
 
@@ -61,16 +60,9 @@ Trusted publishing lets GitHub Actions push to PyPI without an API token — Git
    - **Environment name**: `pypi`
 5. Save.
 
-**Repeat for TestPyPI** at <https://test.pypi.org> with environment name `testpypi`.
+**Create the GitHub environment** (so the workflow can reference it):
 
-**Create the GitHub environments** (so the workflow can reference them):
-
-```bash
-# These are simple environment stubs — the workflow file references them
-# as `environment: pypi` / `environment: testpypi`. GitHub creates them
-# on first run; you can also create them ahead of time via the web UI:
-# https://github.com/kkollsga/kglite-docs/settings/environments
-```
+The `release.yml` workflow uses `environment: pypi`. GitHub creates it on first run; you can also create it ahead of time at <https://github.com/kkollsga/kglite-docs/settings/environments>.
 
 That's the entire one-time setup.
 
@@ -86,10 +78,10 @@ git push origin v0.1.0
 The `release.yml` workflow fires automatically and:
 
 1. Builds `sdist` + `wheel` (pure-Python, single artifact across OSes).
-2. Publishes to **TestPyPI** via trusted publisher.
-3. Spins up a fresh venv and runs `pip install kglite-docs==0.1.0` from TestPyPI as a smoke test.
-4. Promotes to **PyPI**.
-5. Creates a **GitHub Release** with auto-generated notes from commits since the previous tag.
+2. Publishes to **PyPI** via trusted publisher.
+3. Creates a **GitHub Release** with auto-generated notes from commits since the previous tag.
+
+The CI matrix (`ci.yml` on every push) already exercises the package on macOS + Linux × Python 3.10–3.13, so the build → publish path doesn't need a TestPyPI dry-run on top.
 
 Watch it:
 
@@ -111,7 +103,7 @@ For every change going forward:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `release.yml` fails at "Publish to TestPyPI" with 403 | Trusted publisher not registered yet | Repeat step 3 |
+| `release.yml` fails at "Publish to PyPI" with 403 | Trusted publisher not registered yet, or environment name mismatch | Repeat step 3; check the env name is `pypi` |
 | `Module 'kglite_docs' has no attribute '__version__'` after install | sdist built without `.git` available | Make sure the workflow checks out with `fetch-depth: 0` (the shipped workflow does) |
 | `pip install kglite-docs` fails with kglite resolver error | kglite has a stricter Python version constraint | Check the kglite version pin in `pyproject.toml` and tighten if needed |
 | CI test failures only on Windows | We don't target Windows in v0.1 | `ci.yml` matrix is mac + linux; revisit if Windows users show up |
