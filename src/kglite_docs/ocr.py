@@ -18,12 +18,12 @@ from kglite_docs.ingest.chunker import chunk_page
 from kglite_docs.ingest.parser import render_page_png
 from kglite_docs.schema import (
     CHUNK,
-    CHUNK_STATUS_NEEDS_OCR,
     CHUNK_STATUS_READY,
     CHUNK_TEXT_COL,
     HAS_CHUNK,
     NEXT_CHUNK,
     PAGE,
+    label_for,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts  # noqa: E402
@@ -171,11 +171,12 @@ def submit_ocr(
     doc_id = page_rows[0]["doc_id"]
     page_number = int(page_rows[0]["page_number"])
 
-    # Delete existing needs_ocr chunks on this page
+    # Delete existing needs_ocr chunks on this page (label predicate
+    # under kglite 0.10.5 multi-label: `(:Chunk:NeedsOcr)`)
     store.cypher(
-        "MATCH (p:Page {id: $pid})-[:HAS_CHUNK]->(c:Chunk) "
-        "WHERE c.status = $st DETACH DELETE c",
-        params={"pid": page_id, "st": CHUNK_STATUS_NEEDS_OCR},
+        "MATCH (p:Page {id: $pid})-[:HAS_CHUNK]->(c:Chunk:NeedsOcr) "
+        "DETACH DELETE c",
+        params={"pid": page_id},
     )
     # Update page state
     store.cypher(
@@ -215,6 +216,10 @@ def submit_ocr(
         return {"page_id": page_id, "chunks_added": 0}
 
     store.upsert_nodes(CHUNK, chunk_rows)
+    # New chunks are all ready
+    ready_label = label_for("chunk.status", CHUNK_STATUS_READY)
+    if ready_label:
+        store.add_label(CHUNK, [r["id"] for r in chunk_rows], ready_label)
     store.upsert_edges(
         HAS_CHUNK, [{"src": page_id, "dst": r["id"]} for r in chunk_rows],
         source_type=PAGE, target_type=CHUNK,

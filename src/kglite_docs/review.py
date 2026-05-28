@@ -49,6 +49,8 @@ from kglite_docs.schema import (
     REVIEW_TICKET,
     REVIEWED,
     TARGETS,
+    label_for,
+    labels_for,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _rows
@@ -101,6 +103,8 @@ def enqueue(
     )
     _record_event(store, ticket_id=ticket_id, event_type=REVIEW_NEW,
                   agent_id=enqueued_by, notes=note)
+    # Initial status label
+    store.add_label(REVIEW_TICKET, [ticket_id], label_for("review.status", REVIEW_NEW))
     return ticket_id
 
 
@@ -119,12 +123,12 @@ def enqueue_chunks(
     if doc_id:
         where.append("c.doc_id = $doc_id")
         params["doc_id"] = doc_id
-    if status_filter:
-        where.append("c.status = $st")
-        params["st"] = status_filter
+    # Chunk status is now a label — fold into MATCH instead of WHERE
+    chunk_label = label_for("chunk.status", status_filter) if status_filter else ""
+    label_clause = f":{chunk_label}" if chunk_label else ""
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     chunks = _rows(store.cypher(
-        f"MATCH (c:Chunk) {clause} RETURN c.id AS id",
+        f"MATCH (c:Chunk{label_clause}) {clause} RETURN c.id AS id",
         params=params,
     ))
     enqueued = 0
@@ -161,6 +165,12 @@ def claim(
         store.upsert_edges(
             CLAIMED, [{"src": agent_id, "dst": ticket_id}],
             source_type=AGENT, target_type=REVIEW_TICKET,
+        )
+        # New → InReview label swap
+        store.swap_label(
+            REVIEW_TICKET, [ticket_id],
+            add=label_for("review.status", REVIEW_IN_REVIEW),
+            remove_any_of=labels_for("review.status"),
         )
     return {"ticket_id": ticket_id, "status": REVIEW_IN_REVIEW,
             "claimed_by": agent_id, "event_id": eid}
@@ -209,6 +219,12 @@ def claim_next(
                     CLAIMED, [{"src": agent_id, "dst": cand["id"]}],
                     source_type=AGENT, target_type=REVIEW_TICKET,
                 )
+                # New → InReview label swap
+                store.swap_label(
+                    REVIEW_TICKET, [cand["id"]],
+                    add=label_for("review.status", REVIEW_IN_REVIEW),
+                    remove_any_of=labels_for("review.status"),
+                )
                 # Hydrate the target so the caller has everything they need
                 target = _hydrate_target(store, cand["target_id"], cand["target_kind"])
                 return {
@@ -239,6 +255,12 @@ def unclaim(
         )
     _record_event(store, ticket_id=ticket_id, event_type=REVIEW_NEW,
                   agent_id=agent_id, notes=reason)
+    # InReview → New label swap (release without verdict)
+    store.swap_label(
+        REVIEW_TICKET, [ticket_id],
+        add=label_for("review.status", REVIEW_NEW),
+        remove_any_of=labels_for("review.status"),
+    )
     return {"ticket_id": ticket_id, "status": REVIEW_NEW, "released_by": agent_id}
 
 
@@ -284,6 +306,12 @@ def complete(
         REVIEWED, [{"src": agent_id, "dst": ticket_id}],
         source_type=AGENT, target_type=REVIEW_TICKET,
     )
+    # InReview → <verdict> label swap
+    store.swap_label(
+        REVIEW_TICKET, [ticket_id],
+        add=label_for("review.status", verdict),
+        remove_any_of=labels_for("review.status"),
+    )
     # Apply any requested tags to the target (only chunks for now)
     target_id, target_kind = _ticket_target(store, ticket_id)
     if target_kind == "Chunk" and tags:
@@ -321,10 +349,13 @@ def list_queue(
     if target_kind:
         where.append("t.target_kind = $tk")
         params["tk"] = target_kind
+    # Status filter via label predicate inline.
+    status_label = label_for("review.status", status) if status else ""
+    label_clause = f":{status_label}" if status_label else ""
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     rows = _rows(store.cypher(
         f"""
-        MATCH (t:ReviewTicket)
+        MATCH (t:ReviewTicket{label_clause})
         {clause}
         RETURN t.id AS id, t.target_id AS target_id, t.target_kind AS target_kind,
                t.priority AS priority, t.created_at AS created_at,
@@ -335,9 +366,10 @@ def list_queue(
     ))
     out = []
     for r in rows:
+        # We still call _current_state to get the claimer (the label only
+        # tells us "in_review", not who holds it). For agent_id filtering
+        # we drop tickets not held by that agent.
         st, claimer = _current_state(store, r["id"])
-        if status and st != status:
-            continue
         if agent_id and claimer != agent_id:
             continue
         r["status"] = st

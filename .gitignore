@@ -34,6 +34,10 @@ tmp/
 # Built docs
 site/
 
+# Maintainer inbox (correspondence from / to dependency teams).
+# Local-only; not part of the published library.
+inbox/
+
 # Sample PDFs (downloadable via scripts/fetch_sample_pdfs.sh — too big for the repo)
 sample_data/pdfs/
 sample_data/subset/

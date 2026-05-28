@@ -126,6 +126,71 @@ class Store:
         self.g.add_connections(df, edge_type, **kwargs)
         return len(rows)
 
+    # ─── labels (kglite 0.10.5+) ──────────────────────────────────────────
+
+    def add_label(
+        self, node_type: str, ids: list[str] | str, label: str,
+    ) -> None:
+        """Attach a secondary label to nodes by id. No-op if `label` is
+        empty or `ids` is empty."""
+        if not label or not ids:
+            return
+        if isinstance(ids, str):
+            ids = [ids]
+        self.g.add_label(node_type, ids, label)
+
+    def remove_label(
+        self, node_type: str, ids: list[str] | str, label: str,
+    ) -> None:
+        """Remove a secondary label. Safe to call when the label isn't
+        present (kglite skips the no-op)."""
+        if not label or not ids:
+            return
+        if isinstance(ids, str):
+            ids = [ids]
+        self.g.remove_label(node_type, ids, label)
+
+    def swap_label(
+        self,
+        node_type: str,
+        ids: list[str] | str,
+        *,
+        remove: str = "",
+        add: str = "",
+        remove_any_of: tuple[str, ...] = (),
+    ) -> None:
+        """State-transition primitive: remove one (or any of N) labels,
+        then add a new one. Used by every lifecycle move
+        (Unverified → Verified, NeedsOcr → Ready, New → InReview, …).
+
+        Pass `remove_any_of=(...)` when the current label is "one of these
+        five mutually-exclusive states" and you want to drop whichever
+        is currently set before adding the new one. Cheaper than a
+        per-node lookup, since `remove_label` is a no-op when the label
+        isn't present.
+        """
+        if isinstance(ids, str):
+            ids = [ids]
+        if not ids:
+            return
+        if remove:
+            self.remove_label(node_type, ids, remove)
+        for r in remove_any_of:
+            if r and r != add:
+                self.remove_label(node_type, ids, r)
+        if add:
+            self.add_label(node_type, ids, add)
+
+    def node_labels(self, node_type: str, node_id: str) -> list[str]:
+        """All labels on a node (primary + secondaries). Useful for
+        tests + diagnostics; not used in hot paths."""
+        df = self.g.cypher(
+            f"MATCH (n:{node_type} {{id: $id}}) RETURN labels(n) AS labels",
+            params={"id": node_id},
+        )
+        out = rows(df)
+        return list(out[0]["labels"]) if out and out[0].get("labels") else []
+
     # ─── embeddings ────────────────────────────────────────────────────────
 
     def set_embeddings(

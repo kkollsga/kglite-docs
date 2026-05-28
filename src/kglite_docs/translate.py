@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kglite_docs.activity import register_agent
-from kglite_docs.schema import AGENT, AUTHORED, CHUNK
+from kglite_docs.schema import AGENT, AUTHORED, CHUNK, label_for, labels_for
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _rows
 
@@ -69,6 +69,11 @@ def add_translation(
                        source_type=CHUNK, target_type=TRANSLATION)
     store.upsert_edges(AUTHORED, [{"src": agent_id, "dst": tid}],
                        source_type=AGENT, target_type=TRANSLATION)
+    # Initial status label (Draft / Reviewed). Translations that ship
+    # straight to `status="reviewed"` (unusual but allowed) skip Draft.
+    status_label = label_for("translation.status", status)
+    if status_label:
+        store.add_label(TRANSLATION, [tid], status_label)
     return tid
 
 
@@ -102,6 +107,12 @@ def mark_translation_reviewed(
         "MATCH (t:Translation {id: $tid}) SET t.status = 'reviewed', "
         "t.reviewed_at = $now, t.reviewed_by = $rid",
         params={"tid": translation_id, "now": _now(), "rid": reviewer_agent_id},
+    )
+    # Swap Draft → Reviewed label
+    store.swap_label(
+        TRANSLATION, [translation_id],
+        add=label_for("translation.status", "reviewed"),
+        remove_any_of=labels_for("translation.status"),
     )
     return {"translation_id": translation_id, "status": "reviewed"}
 

@@ -27,6 +27,7 @@ from kglite_docs.schema import (
     CHUNK,
     TAG,
     TAGGED_AS,
+    label_for,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts
@@ -55,6 +56,10 @@ def _ensure_tag(store: Store, name: str, *, kind: str = "custom", description: s
             TAG,
             [{"id": tag_id, "title": name, "name": name, "kind": kind, "description": description}],
         )
+        # Tag.kind → label so `MATCH (t:Tag:Topic)` filters efficiently.
+        kind_label = label_for("tag.kind", kind)
+        if kind_label:
+            store.add_label(TAG, [tag_id], kind_label)
     return tag_id
 
 
@@ -124,7 +129,10 @@ def list_tags(
     agent_id: str | None = None,
     kind: str | None = None,
 ) -> list[dict[str, Any]]:
-    parts = ["MATCH (c:Chunk)-[:TAGGED_AS]->(tg:Tagging)-[:OF_TAG]->(t:Tag)"]
+    # Tag kind becomes a label predicate inline; everything else is
+    # a normal WHERE filter.
+    tag_label = ":" + label_for("tag.kind", kind) if kind else ""
+    parts = [f"MATCH (c:Chunk)-[:TAGGED_AS]->(tg:Tagging)-[:OF_TAG]->(t:Tag{tag_label})"]
     where: list[str] = []
     params: dict[str, Any] = {}
     if doc_id:
@@ -136,9 +144,6 @@ def list_tags(
     if agent_id:
         where.append("tg.by_agent = $agent_id")
         params["agent_id"] = agent_id
-    if kind:
-        where.append("t.kind = $kind")
-        params["kind"] = kind
     if where:
         parts.append("WHERE " + " AND ".join(where))
     parts.append(

@@ -51,8 +51,9 @@ def document_to_md(store: Store, doc_id: str, *, include_summaries: bool = False
             last_page = page
         parts.append(c.get("text") or "")
         if include_summaries:
+            # Verified summaries via label predicate (kglite 0.10.5)
             sums = _rows(store.cypher(
-                "MATCH (s:Summary) WHERE s.target_id = $cid AND s.verification_status = 'verified' "
+                "MATCH (s:Summary:Verified) WHERE s.target_id = $cid "
                 "RETURN s.text AS text",
                 params={"cid": c["id"]},
             ))

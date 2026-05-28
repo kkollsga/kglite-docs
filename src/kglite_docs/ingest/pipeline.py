@@ -27,6 +27,7 @@ from kglite_docs.schema import (
     HAS_PAGE,
     NEXT_CHUNK,
     PAGE,
+    label_for,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _rows
@@ -182,6 +183,8 @@ def ingest_document(
     # Insert Chunks
     chunk_rows: list[dict[str, object]] = []
     chunk_ids_by_page: dict[int, list[str]] = {}
+    # Group chunk ids by status so we can add labels in one batch per kind.
+    chunk_ids_by_status: dict[str, list[str]] = {}
     for status, ch, p in all_chunks:
         cid = _chunk_id(doc_id, p.page_number, ch.chunk_index)
         chunk_rows.append({
@@ -194,13 +197,21 @@ def ingest_document(
             CHUNK_TEXT_COL: ch.text,
             "token_count": ch.token_count,
             "headings_json": _safe_json(ch.headings),
-            "status": status,
+            "status": status,                   # property still written
             "text_hash": ch.text_hash_value if ch.text else "",
             "view_count": 0,
             "last_viewed_at": "",
         })
         chunk_ids_by_page.setdefault(p.page_number, []).append(cid)
+        chunk_ids_by_status.setdefault(status, []).append(cid)
     store.upsert_nodes(CHUNK, chunk_rows)
+
+    # Multi-label (kglite 0.10.5): tag each chunk with its status label
+    # in batches per status — `MATCH (c:Chunk:Ready)` is now O(label-index).
+    for status, ids in chunk_ids_by_status.items():
+        status_label = label_for("chunk.status", status)
+        if status_label:
+            store.add_label(CHUNK, ids, status_label)
 
     # Edges: Page→Chunk, Document→Chunk, and NEXT_CHUNK in reading order
     page_chunk_edges = [

@@ -7,6 +7,66 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.4] — 2026-05-28
+
+### Changed (internal data model — public API unchanged)
+
+- **Adopted kglite 0.10.5 multi-label nodes.** Categorical / lifecycle
+  state — `Agent.role`, `Agent.kind`, `Chunk.status`,
+  `Summary.verification_status`, `Tag.kind`, `Translation.status`,
+  and `ReviewTicket` lifecycle — now lives as secondary labels on the
+  relevant node (`(a:Agent:Reviewer:LLM)`, `(c:Chunk:Ready)`,
+  `(s:Summary:Verified)`, etc.). Property scans are replaced with
+  `MATCH (n:Label)` predicates, which kglite indexes natively. Cross-
+  type predicates like `MATCH (n:Reviewed)` return any reviewed thing
+  in the graph regardless of primary type — useful for governance
+  queries.
+
+  The `Corpus` Python / CLI / MCP surface is **unchanged**: callers
+  still pass `status="verified"` / `role="reviewer"` / `verdict="reviewed"`
+  strings. A new `schema.label_for(discriminator, value)` helper maps
+  user-facing strings → canonical PascalCase label names at the
+  boundary. Free-text discriminators (notably `Agent.role`) get
+  slug → PascalCase conversion: `"fact-checker"` → `:FactChecker`.
+
+  Labels are maintained atomically via a new `Store.swap_label`
+  primitive: every state transition (`verify_summary`, `submit_ocr`,
+  `claim_review`, `complete_review`, `mark_translation_reviewed`)
+  removes the old label and adds the new one in one call.
+
+  Event-sourced models (`VerificationEvent`, `ReviewEvent`) still
+  carry the immutable audit trail. The labels denormalise "current
+  state" for O(label-index) reads instead of "scan events, pick latest".
+
+  + 7 new tests covering label round-trip, swap mutual-exclusion,
+  save/reload survival, and cross-type label predicates.
+
+- **`kglite>=0.10.5`** required (was `>=0.10.4`).
+
+### Breaking — raw Cypher only
+
+If you wrote raw Cypher against `corpus.cypher(...)` and filtered on
+`Summary.verification_status`, `Chunk.status`, `Agent.role`, `Agent.kind`,
+`Tag.kind`, or `Translation.status`, switch from
+`WHERE n.prop = '...'` to `MATCH (n:NodeType:Label)`. Example:
+
+```cypher
+-- before
+MATCH (s:Summary) WHERE s.verification_status = 'verified' RETURN s
+-- after
+MATCH (s:Summary:Verified) RETURN s
+```
+
+Label names use PascalCase: `Verified`, `Disputed`, `NeedsRevision`,
+`Stale`, `Unverified`, `Ready`, `NeedsOcr`, `Empty`, `LLM`, `Human`,
+`Service`, `Reviewer`, `Writer`, `FactChecker`, etc. The Cypher
+escape hatch tool in the MCP server still works the same way — the
+agent just writes label predicates now.
+
+`.kgl` files created by v0.0.x still load on v0.0.4 — labels won't
+exist on those nodes (so label-filter queries against old corpora
+return empty); re-ingest to populate labels.
+
 ## [0.0.3] — 2026-05-28
 
 ### Added
@@ -199,7 +259,8 @@ Filed in the kglite inbox at
   to keep things fast; run locally with the model cached).
 - End-to-end Sonnet workflow demo proves the agent path beyond unit tests.
 
-[Unreleased]: https://github.com/kkollsga/kglite-docs/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/kkollsga/kglite-docs/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.4
 [0.0.3]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.3
 [0.0.2]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.2
 [0.0.1]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.1

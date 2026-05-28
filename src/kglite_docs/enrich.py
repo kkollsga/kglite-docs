@@ -33,6 +33,8 @@ from kglite_docs.schema import (
     VERIFICATION_UNVERIFIED,
     VERIFIED_BY,
     VERIFIES,
+    label_for,
+    labels_for,
 )
 from kglite_docs.store import Store
 
@@ -111,6 +113,11 @@ def add_summary(
             "source_text_hash": sth,
         }],
     )
+    # Initial verification label — labels are the truth, the property
+    # is the legacy backup (kept for now; will drop in a future minor).
+    initial_label = label_for("summary.verification_status", VERIFICATION_UNVERIFIED)
+    if initial_label:
+        store.add_label(SUMMARY, [sid], initial_label)
     store.upsert_edges(
         AUTHORED, [{"src": agent_id, "dst": sid}],
         source_type=AGENT, target_type=SUMMARY,
@@ -190,6 +197,15 @@ def verify_summary(
         AUTHORED, [{"src": verifier_agent_id, "dst": event_id}],
         source_type=AGENT, target_type="VerificationEvent",
     )
+    # Atomic label swap to match the new verdict — drop any prior
+    # verification label, add the new one. Labels are the queryable
+    # "current state"; events stay as the immutable audit trail.
+    new_label = label_for("summary.verification_status", verdict)
+    store.swap_label(
+        SUMMARY, [summary_id],
+        add=new_label,
+        remove_any_of=labels_for("summary.verification_status"),
+    )
     return {
         "summary_id": summary_id, "status": verdict,
         "verified_at": now, "verified_by": verifier_agent_id,
@@ -215,6 +231,12 @@ def get_summaries(
     status: str | None = None,
     depth: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Return summaries on a target with their current verification status.
+
+    Status filter uses the label predicate (`MATCH (s:Summary:Verified)`)
+    — O(label-index), no Python post-filter. The latest VerificationEvent
+    is still joined to surface `verified_at` / `verifier` / `notes`.
+    """
     where = ["s.target_id = $id"]
     params: dict[str, Any] = {"id": target_id}
     if target_kind:
@@ -223,19 +245,34 @@ def get_summaries(
     if depth:
         where.append("s.depth = $d")
         params["d"] = depth
+    status_label = label_for("summary.verification_status", status) if status else ""
+    label_clause = f":{status_label}" if status_label else ""
     df = store.cypher(
-        f"MATCH (s:Summary) WHERE {' AND '.join(where)} "
+        f"MATCH (s:Summary{label_clause}) WHERE {' AND '.join(where)} "
         "OPTIONAL MATCH (a:Agent)-[:AUTHORED]->(s) "
         "RETURN s.id AS id, s.text AS text, s.depth AS depth, "
-        "s.verification_status AS initial_status, s.created_at AS created_at, "
+        "labels(s) AS labels, s.created_at AS created_at, "
         "s.model AS model, s.source_text_hash AS source_text_hash, "
         "a.id AS author_agent "
         "ORDER BY s.created_at DESC",
         params=params,
     )
     rows = _df_dicts(df)
-    # Layer in the latest verification event per summary (event-sourced).
+    # Derive status from labels; layer the latest event for metadata.
+    summary_label_set = set(labels_for("summary.verification_status"))
     for row in rows:
+        node_labels = row.pop("labels", []) or []
+        status_labels = [lbl for lbl in node_labels if lbl in summary_label_set]
+        # Reverse-map label → user-facing status string
+        derived_status = VERIFICATION_UNVERIFIED
+        for k, v in {
+            "Unverified": "unverified", "Verified": "verified",
+            "Disputed": "disputed", "NeedsRevision": "needs_revision",
+            "Stale": "stale",
+        }.items():
+            if k in status_labels:
+                derived_status = v
+                break
         ev = _df_dicts(store.cypher(
             "MATCH (s:Summary {id: $sid})-[:HAS_VERIFICATION]->(e:VerificationEvent) "
             "RETURN e.verdict AS verdict, e.verifier_agent_id AS verifier, "
@@ -243,18 +280,15 @@ def get_summaries(
             "ORDER BY e.created_at DESC LIMIT 1",
             params={"sid": row["id"]},
         ))
+        row["status"] = derived_status
         if ev:
-            row["status"] = ev[0]["verdict"]
             row["verified_at"] = ev[0]["at"]
             row["verifier_agent"] = ev[0]["verifier"]
             row["notes"] = ev[0]["notes"]
         else:
-            row["status"] = row.get("initial_status") or VERIFICATION_UNVERIFIED
             row["verified_at"] = None
             row["verifier_agent"] = None
             row["notes"] = ""
-    if status:
-        rows = [r for r in rows if r["status"] == status]
     return rows
 
 
@@ -338,6 +372,13 @@ def mark_stale_for_doc(store: Store, doc_id: str) -> int:
             store.upsert_edges(
                 "HAS_VERIFICATION", [{"src": row["id"], "dst": event_id}],
                 source_type=SUMMARY, target_type="VerificationEvent",
+            )
+            # Swap to :Stale label
+            stale_label = label_for("summary.verification_status", VERIFICATION_STALE)
+            store.swap_label(
+                SUMMARY, [row["id"]],
+                add=stale_label,
+                remove_any_of=labels_for("summary.verification_status"),
             )
             count += 1
     return count

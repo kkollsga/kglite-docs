@@ -26,6 +26,7 @@ from kglite_docs.schema import (
     CHUNK,
     VIEW,
     VIEWED,
+    label_for,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts
@@ -79,7 +80,8 @@ def upsert_agent(
         "MATCH (a:Agent {id: $id}) "
         "RETURN a.kind AS kind, a.model AS model, a.role AS role, "
         "a.system_prompt AS system_prompt, a.tools_json AS tools_json, "
-        "a.context_json AS context_json, a.description AS description",
+        "a.context_json AS context_json, a.description AS description, "
+        "labels(a) AS labels",
         params={"id": agent_id},
     ))
     if not existing:
@@ -100,6 +102,13 @@ def upsert_agent(
                 "action_count": 0,
             }],
         )
+        # Initial labels from kind + role
+        kind_label = label_for("agent.kind", kind)
+        role_label = label_for("agent.role", role)
+        if kind_label:
+            store.add_label(AGENT, [agent_id], kind_label)
+        if role_label:
+            store.add_label(AGENT, [agent_id], role_label)
         return {**get_agent(store, agent_id=agent_id), "created": True}
 
     # Merge: only SET the properties the caller actually supplied.
@@ -125,6 +134,17 @@ def upsert_agent(
             f"MATCH (a:Agent {{id: $id}}) SET a.{key} = $v",
             params={"id": agent_id, "v": value},
         )
+
+    # Label sync: if kind/role changed, swap the corresponding label.
+    if "kind" in updates:
+        old_kind_label = label_for("agent.kind", cur.get("kind") or "")
+        new_kind_label = label_for("agent.kind", kind)
+        store.swap_label(AGENT, [agent_id], remove=old_kind_label, add=new_kind_label)
+    if "role" in updates:
+        old_role_label = label_for("agent.role", cur.get("role") or "")
+        new_role_label = label_for("agent.role", role)
+        store.swap_label(AGENT, [agent_id], remove=old_role_label, add=new_role_label)
+
     return {**get_agent(store, agent_id=agent_id), "created": False}
 
 
@@ -168,6 +188,11 @@ def register_agent(
             "action_count": 1,
         }],
     )
+    # Initial kind label (no role on lazy register; role gets set later
+    # via upsert_agent if the caller cares).
+    kind_label = label_for("agent.kind", kind)
+    if kind_label:
+        store.add_label(AGENT, [agent_id], kind_label)
     return {"id": agent_id, "created": True, "last_seen": now}
 
 
@@ -196,23 +221,28 @@ def list_agents(
     store: Store, *, role: str | None = None, kind: str | None = None,
 ) -> list[dict[str, Any]]:
     """List configured agents. Filter by `role` (free-text — whatever
-    you wrote at upsert time) or `kind` (llm/human/service)."""
-    where: list[str] = []
-    params: dict[str, Any] = {}
-    if role:
-        where.append("a.role = $role")
-        params["role"] = role
+    you wrote at upsert time) or `kind` (llm/human/service).
+
+    Filters use label predicates internally (kglite 0.10.5 multi-label)
+    rather than property scans, so the cost is O(label-index size).
+    """
+    # Build the Cypher MATCH clause with label predicates inline.
+    labels = ["Agent"]
     if kind:
-        where.append("a.kind = $kind")
-        params["kind"] = kind
-    clause = ("WHERE " + " AND ".join(where)) if where else ""
+        kind_label = label_for("agent.kind", kind)
+        if kind_label:
+            labels.append(kind_label)
+    if role:
+        role_label = label_for("agent.role", role)
+        if role_label:
+            labels.append(role_label)
+    label_clause = ":".join(labels)
     df = store.cypher(
-        f"MATCH (a:Agent) {clause} "
+        f"MATCH (a:{label_clause}) "
         "RETURN a.id AS id, a.kind AS kind, a.model AS model, a.role AS role, "
         "a.description AS description, a.first_seen AS first_seen, "
         "a.last_seen AS last_seen, a.action_count AS actions "
         "ORDER BY a.last_seen DESC",
-        params=params,
     )
     return _df_dicts(df)
 
