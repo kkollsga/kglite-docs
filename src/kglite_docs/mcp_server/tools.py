@@ -32,8 +32,21 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         with_summaries: bool = False,
         agent_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Semantic + filtered chunk search. Pass `agent_id` to record
-        views automatically."""
+        """Semantic chunk search across the whole corpus.
+
+        Embeds `query` with the same bge-m3 model the corpus was indexed
+        under, then returns the top-`top_k` chunks by cosine similarity.
+
+        - `filters`: equality predicates on chunk fields, e.g.
+          `{"doc_id": "doc_abc..."}` or `{"page": 5}`. Combine multiple
+          keys for AND.
+        - `with_summaries=True`: inline verified summaries on each hit.
+        - `agent_id`: record a `View` on each hit so attention is
+          queryable later. Skip when running speculative searches.
+
+        Returns a list of `{id, score, text, doc_id, page, status, ...}`
+        ordered by score descending. Score 1.0 = identical embedding;
+        ~0.7 is "strong match" for bge-m3 cosine."""
         return corpus.search(
             query, top_k=top_k, filters=filters,
             with_summaries=with_summaries, agent_id=agent_id,
@@ -65,7 +78,17 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         include_summaries: bool = True,
         agent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Return a budgeted, ranked context bundle for a query."""
+        """Build a prompt-ready, token-budgeted context bundle.
+
+        Runs `search`, packs results greedy until `max_tokens` is hit
+        (bge-m3 tokenizer count), and returns
+        `{query, budget_tokens, used_tokens, items}`.
+
+        Use this *instead of* calling `search` then concatenating
+        chunks yourself — it inlines verified summaries when present
+        (so the agent sees pre-checked context), respects the budget,
+        and applies optional `per_doc_cap` to keep one document from
+        crowding out the bundle."""
         return corpus.compose_context(
             query, max_tokens=max_tokens, per_doc_cap=per_doc_cap,
             include_summaries=include_summaries, agent_id=agent_id,
@@ -81,7 +104,18 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         model: str = "",
         tags: list[str] | None = None,
     ) -> str:
-        """Write a Summary on a chunk/page/document. Returns the summary id."""
+        """Write a Summary on a Chunk / Page / Document.
+
+        Status starts as `unverified`. A *different* agent must call
+        `verify_summary(summary_id, verdict, verifier_agent_id=...)` to
+        flip it to `verified` / `disputed` / `needs_revision` — the
+        server rejects self-verification.
+
+        `depth` is one of `chunk`, `section`, or `document`. Optional
+        `tags` get applied to the *target* node via `tag_chunk`.
+
+        Returns the summary id (uuid). Persist it if you need to refer
+        back, e.g. for a later `verify_summary` call."""
         return corpus.add_summary(
             target_id, text, target_kind=target_kind, depth=depth,
             agent_id=agent_id, model=model, tags=tags or [],
@@ -215,8 +249,20 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
 
     @app.tool()
     def check_grounding(summary_id: str, threshold: float = 0.5) -> dict[str, Any]:
-        """Per-sentence grounding check: which sentences of a summary
-        have weak support in the source chunks?"""
+        """Score how well each sentence in a summary is supported by
+        its source chunk(s) — a hallucination guard.
+
+        Splits the summary on `.!?`, embeds each sentence, computes
+        cosine similarity to the source chunk's embedding, and flags
+        any sentence whose best match is below `threshold` (default 0.5)
+        as `supported=False` in the returned `weak_sentences` list.
+
+        Returns `{summary_id, sentences[], supported_fraction,
+        grounding_score, weak_sentences[], threshold}`.
+
+        Cheap baseline (cosine, not NLI) — surface weak claims for
+        human/agent review rather than treating it as ground truth.
+        Pair with `verify_claim(claim_text, ...)` for free-text claims."""
         return corpus.check_grounding(summary_id, threshold=threshold)
 
     @app.tool()
@@ -305,9 +351,24 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         agent_id: str, target_kind: str | None = None,
         min_priority: int | None = None,
     ) -> dict[str, Any] | None:
-        """Pull next ticket: highest priority, oldest first. Returns the
-        ticket with the target hydrated, or null when the queue is empty.
-        This is the agent's main entry point — call it in a loop."""
+        """Pull the next ticket off the review queue and claim it for
+        this agent atomically.
+
+        Highest `priority` first, then oldest `created_at`. Returns
+        `{ticket_id, status: "in_review", claimed_by, target: {...}, ...}`
+        with the target node hydrated (full chunk text + page +
+        headings, ready to inspect), or `null` if the queue is empty.
+
+        This is the agent's main entry point — typical loop:
+
+            while True:
+                t = claim_next_review(agent_id="me")
+                if t is None: break
+                # inspect t.target, call verify_claim / check_grounding,
+                # then complete_review(t.ticket_id, ..., verdict=..., tags=...)
+
+        Within a single MCP-server process, two callers can't claim the
+        same ticket (process-local lock)."""
         return corpus.claim_next_review(
             agent_id=agent_id, target_kind=target_kind, min_priority=min_priority,
         )
@@ -326,9 +387,19 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         notes: str = "",
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Finish a review with a verdict (reviewed / needs_revision /
-        rejected). Optional accuracy in [0,1] and authenticity verdict.
-        Tags are applied to the target chunk."""
+        """Close a review ticket with a verdict and any review metadata.
+
+        `verdict`: one of `reviewed` (passed), `needs_revision`
+        (author should revisit), or `rejected` (content is wrong).
+        Only the agent currently holding the ticket can complete it —
+        `ReviewConflict` otherwise.
+
+        `accuracy` ∈ [0, 1] is your subjective confidence the content
+        is correct; `authenticity` is a free-text or enum verdict
+        (`verified` / `disputed` / etc.). `notes` becomes part of the
+        immutable audit trail. `tags` are applied to the target chunk
+        with `kind="review"` so they're distinguishable from topical
+        tags later (`list_tags(kind="review")`)."""
         return corpus.complete_review(
             ticket_id, agent_id=agent_id, verdict=verdict,
             accuracy=accuracy, authenticity=authenticity, notes=notes, tags=tags,

@@ -33,6 +33,9 @@ src/kglite_docs/_version.py
 tmp/
 .DS_Store
 
+# Built docs
+site/
+
 # Sample PDFs (downloadable via scripts/fetch_sample_pdfs.sh — too big for the repo)
 sample_data/pdfs/
 sample_data/subset/
