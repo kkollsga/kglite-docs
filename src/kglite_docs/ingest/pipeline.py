@@ -226,23 +226,6 @@ def ingest_document(
     if embeddable:
         ids, texts = zip(*embeddable)
         vecs = embedder.embed(list(texts))
-        # Workaround for kglite 0.10.3 bug: after `add_nodes(Chunk, ...)`
-        # in a session, previously-loaded Chunk nodes become invisible to
-        # `set_embeddings` (they get reported as "skipped"). Save +
-        # reload rebuilds the internal id index. We do it here, between
-        # the chunk-add and the embedding write, so the merged dict
-        # actually persists all entries. Only kicks in when there are
-        # pre-existing chunk embeddings worth protecting. See
-        # observations.md filed against kglite for the upstream bug.
-        if store.path is not None:
-            try:
-                pre = store.g.embeddings(CHUNK, CHUNK_TEXT_COL)
-            except Exception:
-                pre = {}
-            if pre:
-                store.save()
-                reloaded = Store.open(store.path)
-                store.g = reloaded.g
         store.add_embeddings(CHUNK, CHUNK_TEXT_COL, dict(zip(ids, vecs)))
 
     return IngestResult(
