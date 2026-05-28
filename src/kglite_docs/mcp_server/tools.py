@@ -188,14 +188,77 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
 
     @app.tool()
     def register_agent(agent_id: str, kind: str = "llm", model: str = "") -> dict[str, Any]:
-        """Explicit agent registration. Most write paths auto-register
-        on first use; this tool exists for setting `kind`/`model`."""
+        """Lazy agent registration — creates a minimal Agent node and
+        bumps counters on existing ones. For setting role / system_prompt
+        / tools / context use `upsert_agent` instead."""
         return corpus.register_agent(agent_id, kind=kind, model=model)
 
     @app.tool()
-    def list_agents() -> list[dict[str, Any]]:
-        """List registered agents with last-seen + action counts."""
-        return corpus.list_agents()
+    def upsert_agent(
+        agent_id: str,
+        kind: str = "llm",
+        model: str = "",
+        role: str = "",
+        system_prompt: str = "",
+        tools: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """Write an agent's template: role, system prompt, model, tool
+        list, and free-form context. The Agent node becomes a *reusable
+        configuration* — orchestrators fetch it via `get_agent` and use
+        the prompt/model/tools to launch the actual LLM call.
+
+        Field-level merge: only fields you supply are updated; others
+        are preserved. Example::
+
+            upsert_agent(
+                agent_id="reviewer-strict",
+                role="reviewer", model="claude-sonnet-4-6",
+                system_prompt="You are a strict fact-checker. ...",
+                tools=["check_grounding", "verify_claim"],
+                context={"strictness": "high", "min_citations": 2},
+                description="Strict reviewer — favours false positives",
+            )
+        """
+        return corpus.upsert_agent(
+            agent_id, kind=kind, model=model, role=role,
+            system_prompt=system_prompt, tools=tools, context=context,
+            description=description,
+        )
+
+    @app.tool()
+    def get_agent(agent_id: str) -> dict[str, Any]:
+        """Retrieve an agent's full template — id, kind, model, role,
+        system_prompt, tools, context, description, plus first_seen /
+        last_seen / action_count.
+
+        Empty dict if the agent isn't registered. Use this to load an
+        agent's loading context before invoking the underlying LLM."""
+        return corpus.get_agent(agent_id)
+
+    @app.tool()
+    def list_agents(
+        role: str | None = None, kind: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List configured agents. Filter by `role` (free-text, what
+        you set at upsert time) or `kind` (llm/human/service)."""
+        return corpus.list_agents(role=role, kind=kind)
+
+    @app.tool()
+    def agent_activity(
+        agent_id: str,
+        target_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Everything an agent has done — views, summaries, tags,
+        translations, review events, verification events. Pass
+        `target_id` to scope to a single chunk / page / document /
+        summary. Answers 'what has the reviewer agent done on chunk X?'
+        in one call."""
+        return corpus.agent_activity(
+            agent_id, target_id=target_id, limit=limit,
+        )
 
     @app.tool()
     def record_view(chunk_id: str, agent_id: str, context: str = "") -> dict[str, Any]:

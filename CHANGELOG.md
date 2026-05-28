@@ -7,6 +7,61 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-05-28
+
+### Added
+
+- **Agent nodes carry a reusable template.** The `Agent` node was
+  previously identity + counters; it now also holds `role`,
+  `system_prompt`, `model`, `tools` (list), `context` (free-form JSON
+  dict), and `description`. The graph IS the registry — orchestrators
+  fetch an agent's loading context with `get_agent(agent_id)`, use
+  the fields to launch the actual LLM call, and every subsequent
+  graph write under the same `agent_id` attributes back to the
+  template.
+
+  New methods on `Corpus`:
+
+  - `upsert_agent(agent_id, *, kind, model, role, system_prompt,
+    tools, context, description)` — field-level merge.
+  - `get_agent(agent_id)` — returns full template + counters; `tools`
+    and `context` come back hydrated (real list / dict, not JSON
+    strings).
+  - `list_agents(role=..., kind=...)` — discovery, with filters.
+  - `agent_activity(agent_id, *, target_id=None)` — bucketed
+    rollup of everything an agent has done (views, summaries, tags,
+    translations, review/verification events). Pass `target_id` to
+    scope to one chunk.
+
+  Old `register_agent` (the lazy on-first-use path) is preserved
+  and now explicitly does *not* clobber template fields when
+  the agent already exists. `add_summary` / `tag_chunk` / etc.
+  still lazy-register if you haven't upserted first.
+
+  New types: `AgentConfig`, `AgentActivity`.
+
+  New MCP tools: `upsert_agent`, `get_agent`, `agent_activity`
+  (existing `register_agent` / `list_agents` keep working;
+  `list_agents` gained `role=` / `kind=` filters).
+
+  9 new tests covering create → update merge → preserves-on-lazy →
+  scoped activity rollups → realistic orchestration round-trip.
+
+  Example::
+
+      corpus.upsert_agent(
+          "reviewer-strict",
+          role="reviewer", model="claude-sonnet-4-6",
+          system_prompt="You are a strict fact-checker...",
+          tools=["check_grounding", "verify_claim"],
+          context={"strictness": "high", "min_citations": 2},
+      )
+      # Later — orchestrator side
+      cfg = corpus.get_agent("reviewer-strict")
+      anthropic.messages.create(
+          model=cfg["model"], system=cfg["system_prompt"], ...
+      )
+
 ## [0.0.2] — 2026-05-28
 
 ### Changed
@@ -144,6 +199,7 @@ Filed in the kglite inbox at
   to keep things fast; run locally with the model cached).
 - End-to-end Sonnet workflow demo proves the agent path beyond unit tests.
 
-[Unreleased]: https://github.com/kkollsga/kglite-docs/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/kkollsga/kglite-docs/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.3
 [0.0.2]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.2
 [0.0.1]: https://github.com/kkollsga/kglite-docs/releases/tag/v0.0.1

@@ -220,14 +220,48 @@ class ReviewStats(TypedDict):
 
 
 class AgentRow(TypedDict, total=False):
-    """`Corpus.list_agents()` row."""
+    """`Corpus.list_agents()` row — identity + counters, no template."""
 
     id: str
     kind: AgentKind
     model: str
+    role: str
+    description: str
     first_seen: str
     last_seen: str
     actions: int
+
+
+class AgentConfig(TypedDict, total=False):
+    """`Corpus.get_agent()` return shape — full template + counters.
+
+    `tools` and `context` are hydrated from the underlying JSON
+    properties so callers receive a real list / dict, not strings."""
+
+    id: str
+    kind: AgentKind
+    model: str
+    role: str
+    system_prompt: str
+    tools: list[str]
+    context: dict[str, Any]
+    description: str
+    first_seen: str
+    last_seen: str
+    action_count: int
+
+
+class AgentActivity(TypedDict, total=False):
+    """`Corpus.agent_activity()` return shape — what an agent has
+    done, optionally scoped to one target node."""
+
+    agent: AgentConfig | None
+    views: list[dict[str, Any]]
+    summaries: list[dict[str, Any]]
+    tags: list[dict[str, Any]]
+    translations: list[dict[str, Any]]
+    review_events: list[dict[str, Any]]
+    verification_events: list[dict[str, Any]]
 
 
 class TagRow(TypedDict, total=False):
@@ -286,7 +320,7 @@ class GroundingReport(TypedDict):
 
 
 __all__ = [
-    "AgentKind", "AgentRow",
+    "AgentActivity", "AgentConfig", "AgentKind", "AgentRow",
     "ChunkDetail", "ChunkStatus",
     "ClusterAlgorithm",
     "ComposedContext", "ContextItem",

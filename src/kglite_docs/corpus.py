@@ -22,6 +22,12 @@ from kglite_docs import quality as quality_mod
 from kglite_docs import review as review_mod
 from kglite_docs import translate as translate_mod
 from kglite_docs.activity import (
+    agent_activity as _agent_activity,
+)
+from kglite_docs.activity import (
+    get_agent as _get_agent,
+)
+from kglite_docs.activity import (
     list_agents as _list_agents,
 )
 from kglite_docs.activity import (
@@ -29,6 +35,9 @@ from kglite_docs.activity import (
 )
 from kglite_docs.activity import (
     register_agent as _register_agent,
+)
+from kglite_docs.activity import (
+    upsert_agent as _upsert_agent,
 )
 from kglite_docs.embed import make_embedder
 from kglite_docs.ingest.pipeline import IngestResult
@@ -48,6 +57,8 @@ from kglite_docs.tagging import (
     untag_chunk as _untag_chunk,
 )
 from kglite_docs.types import (
+    AgentActivity,
+    AgentConfig,
     AgentKind,
     AgentRow,
     ChunkDetail,
@@ -470,12 +481,65 @@ class Corpus:
     # ─── agents ───────────────────────────────────────────────────────────
 
     def register_agent(
-        self, agent_id: str, *, kind: AgentKind = "llm", model: str = ""
+        self, agent_id: str, *, kind: AgentKind = "llm", model: str = "",
     ) -> dict[str, Any]:
+        """Idempotent lazy registration. Bumps `last_seen` + counters
+        if the agent already exists; minimal-record creates otherwise.
+        Does *not* overwrite template fields — use `upsert_agent` for
+        that."""
         return _register_agent(self._store, agent_id=agent_id, kind=kind, model=model)
 
-    def list_agents(self) -> list[AgentRow]:
-        return _list_agents(self._store)
+    def upsert_agent(
+        self,
+        agent_id: str,
+        *,
+        kind: AgentKind = "llm",
+        model: str = "",
+        role: str = "",
+        system_prompt: str = "",
+        tools: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+        description: str = "",
+    ) -> AgentConfig:
+        """Write the agent's template: role, system prompt, model,
+        tool list, free-form context. Field-level merge with whatever
+        already exists. Returns the resulting config.
+
+        Once defined, fetch with `get_agent(agent_id)` and use the
+        config to launch your LLM call — the agent_id you then use
+        for subsequent `add_summary` / `complete_review` / etc.
+        will be attributed back to this template."""
+        return _upsert_agent(
+            self._store, agent_id=agent_id, kind=kind, model=model,
+            role=role, system_prompt=system_prompt,
+            tools=tools, context=context, description=description,
+        )
+
+    def get_agent(self, agent_id: str) -> AgentConfig:
+        """Full agent config — template + counters. Empty dict if the
+        agent isn't registered yet."""
+        return _get_agent(self._store, agent_id=agent_id)
+
+    def list_agents(
+        self, *, role: str | None = None, kind: AgentKind | None = None,
+    ) -> list[AgentRow]:
+        """List configured agents, optionally filtered by role or kind."""
+        return _list_agents(self._store, role=role, kind=kind)
+
+    def agent_activity(
+        self,
+        agent_id: str,
+        *,
+        target_id: str | None = None,
+        limit: int = 50,
+    ) -> AgentActivity:
+        """Everything this agent has done in the corpus — optionally
+        scoped to one target node. Buckets: views, summaries, tags,
+        translations, review_events, verification_events."""
+        return _agent_activity(
+            self._store, agent_id=agent_id,
+            target_id=target_id, limit=limit,
+        )
 
     def record_view(
         self, chunk_id: str, agent_id: str, *, context: str = ""
