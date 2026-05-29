@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "kglite-docs"
 # Bump this and push to main — the release.yml workflow checks PyPI
 # and publishes if the version is new. No git tag needed.
-version = "0.0.6"
+version = "0.0.7"
 description = "Agent-first PDF knowledge base — chunk, embed, cluster, enrich, and serve over MCP. Built on kglite + bge-m3."
 readme = "README.md"
 license = "MIT"

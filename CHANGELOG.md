@@ -7,6 +7,12 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.7] — 2026-05-30
+
+Release theme: **honest coverage** — every coverage-reducing decision (image-only
+pages, unembedded chunks, an unindexed corpus, a truncated ledger) is now
+observable in the return value instead of silently assumed.
+
 ### Added — honest coverage
 - **`document("coverage")` / `Corpus.coverage_report()` (FEAT-1):** per-document
   + corpus extraction & embedding coverage — `image_pages`, `low_text_pages`,
