@@ -823,7 +823,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         - **`define`** — create a study. Requires `question`, `agent_id`
           (the creator); optional `title`. Returns the study id.
         - **`assess`** — record one assessment. Requires `study_id`,
-          `chunk_id`, `stance` (`supports`/`against`/`neutral`), `weight`
+          `chunk_id`, `stance` (`supports`/`against`/`neutral`/`deferred` —
+          `deferred` = read but can't judge yet, e.g. an image/needs_ocr chunk;
+          it's counted distinctly and stays in the work-list), `weight`
           (0..1 probative strength), `agent_id`; optional `rationale`,
           `model`, and **`context_chunk_ids`** — neighbor chunks you had to
           read to interpret this one (e.g. from `chunk("get", window=…)`).

@@ -86,7 +86,7 @@ embeddings; iterate chunks via study("next"), so you can skip index):
   1. sid = study("define", question="X is necessary", agent_id="lead")
   2. for ch in study("next", study_id=sid, agent_id="reader-1", doc_id="..."):
         study("assess", study_id=sid, chunk_id=ch["id"],
-              stance="supports"|"against"|"neutral", weight=0..1,
+              stance="supports"|"against"|"neutral"|"deferred", weight=0..1,
               rationale="...", agent_id="reader-1")
         — passing agent_id to next CLAIMS the chunks (punchcard), so a
           fan-out of analysts gets disjoint batches and never overlaps.

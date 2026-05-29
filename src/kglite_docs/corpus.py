@@ -1092,8 +1092,10 @@ class Corpus:
         rationale: str = "", model: str = "",
         context_chunk_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Record stance (supports/against/neutral) + probative weight [0,1] +
-        rationale on a chunk toward a study. Append-only; never embeds.
+        """Record stance (supports/against/neutral/deferred) + probative weight
+        [0,1] + rationale on a chunk toward a study. Append-only; never embeds.
+        `deferred` = read but unjudgeable yet (blocked/needs evidence): counted
+        distinctly and kept in the work-list for a later pass.
 
         `context_chunk_ids`: neighbor chunks read to interpret the focal one;
         recorded so retrieval pulls the span and they're excluded from the

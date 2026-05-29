@@ -7,6 +7,17 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — evidence integrity
+- **`deferred` stance for evidence assessments (FEAT-7).** Alongside
+  `supports`/`against`/`neutral`, an agent can now assess a chunk as `deferred` —
+  "read but can't judge yet" (an image-only / `needs_ocr` chunk, or a claim
+  awaiting a source not yet ingested). Unlike `neutral` ("read, irrelevant"),
+  `deferred` is counted distinctly in `study_ledger` tallies
+  (`deferred`/`deferred_weight`) and keeps the chunk in the `study("next")`
+  work-list so it resurfaces for a later pass — blocked evidence is parked, never
+  silently dropped. Filter the ledger with `stance="deferred"` to list what's
+  still blocked.
+
 ## [0.0.7] — 2026-05-30
 
 Release theme: **honest coverage** — every coverage-reducing decision (image-only

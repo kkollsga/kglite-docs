@@ -285,6 +285,39 @@ def test_validation(corpus: Corpus, tmp_path: Path) -> None:
         corpus.define_study("", created_by="lead")
 
 
+def test_deferred_stance_tallied_distinctly(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-7: `deferred` is counted on its own, not folded into neutral."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1")
+    corpus.assess(sid, ch[1], stance="neutral", weight=0.1, agent_id="a1")
+    corpus.assess(sid, ch[2], stance="deferred", weight=0.4, agent_id="a1",
+                  rationale="image-only — needs OCR")
+
+    tallies = corpus.study_ledger(sid)["tallies"]
+    assert tallies["deferred"] == 1
+    assert tallies["deferred_weight"] == 0.4
+    assert tallies["neutral"] == 1          # deferred not folded into neutral
+
+    # The new label routes through label_for, so stance filtering works.
+    deferred_rows = corpus.study_ledger(sid, stance="deferred")["rows"]
+    assert [r["chunk_id"] for r in deferred_rows] == [ch[2]]
+    assert deferred_rows[0]["stance"] == "deferred"
+
+
+def test_deferred_chunk_stays_in_work_list(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-7: a deferred chunk is parked, not done — it reappears in the
+    work-list, whereas a real stance removes the chunk."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="deferred", weight=0.3, agent_id="a1")
+    corpus.assess(sid, ch[1], stance="supports", weight=0.8, agent_id="a1")
+
+    remaining = {r["id"] for r in corpus.next_unassessed(sid, limit=1000)}
+    assert ch[0] in remaining, "deferred chunk must stay in the work-list"
+    assert ch[1] not in remaining, "a judged chunk must drop out"
+
+
 def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
     """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
     ch = _ingest_chunks(corpus, tmp_path)

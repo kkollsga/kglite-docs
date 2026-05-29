@@ -101,7 +101,10 @@ CHUNK_EMBED_DONE: Final = "done"
 STANCE_SUPPORTS: Final = "supports"
 STANCE_AGAINST: Final = "against"
 STANCE_NEUTRAL: Final = "neutral"
-VALID_STANCES: Final = frozenset({STANCE_SUPPORTS, STANCE_AGAINST, STANCE_NEUTRAL})
+STANCE_DEFERRED: Final = "deferred"  # read but unjudgeable yet (blocked/needs evidence)
+VALID_STANCES: Final = frozenset(
+    {STANCE_SUPPORTS, STANCE_AGAINST, STANCE_NEUTRAL, STANCE_DEFERRED}
+)
 
 # Study lifecycle
 STUDY_OPEN: Final = "open"
@@ -163,6 +166,7 @@ LABEL_UNEMBEDDED: Final = "Unembedded"
 LABEL_SUPPORTS: Final = "Supports"
 LABEL_AGAINST: Final = "Against"
 LABEL_NEUTRAL: Final = "Neutral"
+LABEL_DEFERRED: Final = "Deferred"
 
 # Study lifecycle → labels
 LABEL_OPEN: Final = "Open"
@@ -222,6 +226,7 @@ _STUDY_STANCE_LABELS: Final[dict[str, str]] = {
     STANCE_SUPPORTS: LABEL_SUPPORTS,
     STANCE_AGAINST: LABEL_AGAINST,
     STANCE_NEUTRAL: LABEL_NEUTRAL,
+    STANCE_DEFERRED: LABEL_DEFERRED,
 }
 
 _STUDY_STATUS_LABELS: Final[dict[str, str]] = {

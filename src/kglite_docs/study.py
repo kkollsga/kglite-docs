@@ -1,8 +1,9 @@
 """Evidence studies — judge document chunks for/against a stored question.
 
 A `Study` is a question/claim. Agents record an `Assessment` on each chunk:
-a stance (supports / against / neutral), a probative `weight` in [0, 1], and a
-free-text `rationale`. Assessments are reified nodes (like `Tagging` /
+a stance (supports / against / neutral / deferred), a probative `weight` in
+[0, 1], and a free-text `rationale`. `deferred` = "read but can't judge yet"
+(blocked / needs evidence) — counted distinctly and kept in the work-list. Assessments are reified nodes (like `Tagging` /
 `ReviewEvent`) so multiple agents can co-assess the same chunk and each
 assessment is independently verifiable.
 
@@ -44,6 +45,7 @@ from kglite_docs.schema import (
     HAS_VERIFICATION,
     HOLDS,
     OF_STUDY,
+    STANCE_DEFERRED,
     STUDY,
     STUDY_CLOSED,
     STUDY_OPEN,
@@ -256,6 +258,12 @@ def assess(
 ) -> dict[str, Any]:
     """Record one agent's stance + probative weight + rationale on a chunk,
     toward a study's question. Append-only (latest wins). Never embeds.
+
+    `stance` is one of supports / against / neutral / deferred. Use `deferred`
+    when the chunk was read but can't be judged yet (e.g. an image-only /
+    needs_ocr chunk, or a claim awaiting a source not yet ingested): it's tallied
+    separately and the chunk stays in `next_unassessed` for a later pass — never
+    silently dropped.
 
     `context_chunk_ids` are neighbor chunks the agent had to read to interpret
     the focal chunk (e.g. an incoherent chunk understood only via the ones
@@ -517,10 +525,14 @@ def next_unassessed(
         chunk_where.append("c.doc_id = $doc")
         base_params["doc"] = doc_id
     where_sql = " AND ".join(chunk_where)
-    # "Done for this study" = assessed as a focal chunk, OR already read as
-    # context for another chunk's assessment (so we never re-judge it).
+    # "Done for this study" = given a *real* (non-deferred) stance as a focal
+    # chunk, OR already read as context for another chunk's assessment (so we
+    # never re-judge it). A `deferred` assessment means "read but unjudgeable
+    # yet" — it parks the chunk, keeping it in the work-list to revisit once the
+    # blocker clears, instead of silently dropping blocked evidence.
     not_done = (
-        "NOT EXISTS { MATCH (c)-[:ASSESSED_AS]->(:Assessment)-[:OF_STUDY]->(:Study {id: $sid}) } "
+        f"NOT EXISTS {{ MATCH (c)-[:ASSESSED_AS]->(a:Assessment)-[:OF_STUDY]->(:Study {{id: $sid}}) "
+        f"WHERE a.stance <> '{STANCE_DEFERRED}' }} "
         "AND NOT EXISTS { MATCH (c)<-[:USED_CONTEXT]-(:Assessment)-[:OF_STUDY]->(:Study {id: $sid}) }"
     )
 
@@ -599,8 +611,9 @@ def _tallies(store: Store, study_id: str) -> dict[str, Any]:
         params={"id": study_id},
     )
     out: dict[str, Any] = {
-        "supports": 0, "against": 0, "neutral": 0,
-        "supports_weight": 0.0, "against_weight": 0.0, "neutral_weight": 0.0,
+        "supports": 0, "against": 0, "neutral": 0, "deferred": 0,
+        "supports_weight": 0.0, "against_weight": 0.0,
+        "neutral_weight": 0.0, "deferred_weight": 0.0,
     }
     for r in _df_dicts(df):
         st = r.get("stance")

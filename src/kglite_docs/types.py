@@ -56,7 +56,7 @@ AgentKind = Literal["llm", "human", "service"]
 ExportFormat = Literal["md", "docx", "pdf"]
 
 #: Stance of an evidence `Assessment` toward a `Study`'s question.
-Stance = Literal["supports", "against", "neutral"]
+Stance = Literal["supports", "against", "neutral", "deferred"]
 
 #: Verdict a second agent assigns when verifying an `Assessment`.
 AssessmentVerdict = Literal["verified", "disputed", "duplicate"]
