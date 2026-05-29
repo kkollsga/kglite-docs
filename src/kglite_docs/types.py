@@ -28,7 +28,8 @@ SummaryStatus = Literal["unverified", "verified", "disputed", "needs_revision", 
 SummaryDepth = Literal["chunk", "section", "document"]
 
 #: `target_kind` argument — what kind of node a Summary, View, ReviewTicket targets.
-TargetKind = Literal["Chunk", "Page", "Document", "Summary"]
+#: `Study` lets a study conclusion be stored as a Summary on the Study node.
+TargetKind = Literal["Chunk", "Page", "Document", "Summary", "Study"]
 
 #: `kind` argument when creating a Tag.
 TagKind = Literal["topic", "entity", "custom", "review"]
@@ -53,6 +54,18 @@ AgentKind = Literal["llm", "human", "service"]
 
 #: Export targets for `export_document` / `export_cluster` / `export_bundle`.
 ExportFormat = Literal["md", "docx", "pdf"]
+
+#: Stance of an evidence `Assessment` toward a `Study`'s question.
+Stance = Literal["supports", "against", "neutral"]
+
+#: Verdict a second agent assigns when verifying an `Assessment`.
+AssessmentVerdict = Literal["verified", "disputed", "duplicate"]
+
+#: Verification status an `Assessment` can be in.
+AssessmentStatus = Literal["unverified", "verified", "disputed", "duplicate"]
+
+#: Lifecycle of a `Study`.
+StudyStatus = Literal["open", "closed"]
 
 
 # ─── Result shapes ─────────────────────────────────────────────────────────
@@ -114,6 +127,8 @@ class ChunkDetail(TypedDict, total=False):
     view_count: int
     next_id: str
     prev_id: str
+    context_before: list[dict[str, Any]]
+    context_after: list[dict[str, Any]]
     summaries: list[dict[str, Any]]
 
 
@@ -273,6 +288,7 @@ class TagRow(TypedDict, total=False):
     by_agent: str
     at: str
     tagging_id: str
+    confidence: float | None
     chunk_id: str
     doc_id: str
 
@@ -308,6 +324,30 @@ class GroundingSentence(TypedDict):
     supported: bool
 
 
+class ComparisonQueryResult(TypedDict):
+    """Per-query hits from each side of a `compare_documents` call."""
+
+    query: str
+    doc_a_hits: list[SearchHit]
+    doc_b_hits: list[SearchHit]
+    merged_context: ComposedContext
+
+
+class ComparisonResult(TypedDict):
+    """`Corpus.compare_documents()` return shape.
+
+    Side-by-side cross-document retrieval result. For each query in the
+    input list, you get the top hits from each document independently
+    plus a budgeted merged context bundle suitable for handing to a
+    downstream LLM that's writing a comparison."""
+
+    doc_a_id: str
+    doc_b_id: str
+    doc_a_title: str
+    doc_b_title: str
+    queries: list[ComparisonQueryResult]
+
+
 class GroundingReport(TypedDict):
     """`Corpus.check_grounding()` return shape."""
 
@@ -319,9 +359,53 @@ class GroundingReport(TypedDict):
     threshold: float
 
 
+# ─── evidence study ────────────────────────────────────────────────────────
+
+
+class StudyRow(TypedDict, total=False):
+    """One study from `Corpus.list_studies()` / `get_study()`."""
+
+    id: str
+    title: str
+    question: str
+    status: StudyStatus
+    created_by: str
+    created_at: str
+    assessment_count: int
+    tallies: dict[str, Any]          # {supports, against, neutral, *_weight}
+    conclusions: list[SummaryRow]    # only on get_study
+
+
+class AssessmentRow(TypedDict, total=False):
+    """One ranked row in a study `ledger`."""
+
+    assessment_id: str
+    chunk_id: str
+    doc_id: str
+    page: int
+    stance: Stance
+    weight: float
+    rationale: str
+    by_agent: str
+    verification_status: AssessmentStatus
+    context_chunk_ids: list[str]
+    text: str
+
+
+class Ledger(TypedDict, total=False):
+    """`Corpus.study_ledger()` return shape — weight-ranked evidence."""
+
+    study_id: str
+    question: str
+    status: StudyStatus
+    rows: list[AssessmentRow]
+    tallies: dict[str, Any]
+
+
 __all__ = [
     "AgentActivity", "AgentConfig", "AgentKind", "AgentRow",
     "ChunkDetail", "ChunkStatus",
+    "ComparisonQueryResult", "ComparisonResult",
     "ClusterAlgorithm",
     "ComposedContext", "ContextItem",
     "DocumentDetail", "DocumentRow",
@@ -337,4 +421,6 @@ __all__ = [
     "TagKind", "TagRow",
     "TargetKind",
     "TranslationStatus",
+    "Stance", "AssessmentVerdict", "AssessmentStatus", "StudyStatus",
+    "StudyRow", "AssessmentRow", "Ledger",
 ]

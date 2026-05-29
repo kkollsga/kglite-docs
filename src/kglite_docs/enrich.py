@@ -82,6 +82,7 @@ def add_summary(
     agent_id: str,
     model: str = "",
     tags: Iterable[str] = (),
+    embed: bool = True,
 ) -> str:
     if depth not in VALID_DEPTHS:
         raise InvalidEnumError(
@@ -126,13 +127,16 @@ def add_summary(
         SUMMARIZES, [{"src": sid, "dst": target_id}],
         source_type=SUMMARY, target_type=target_kind,
     )
-    # Embed the summary text into its own store
-    try:
-        vec = embedder.embed([text])[0]
-        store.add_embeddings(SUMMARY, SUMMARY_TEXT_COL, {sid: vec})
-    except Exception:
-        # Embedding is optional; failure shouldn't block the write
-        pass
+    # Embed the summary text into its own store. Opt-out via embed=False
+    # (e.g. study conclusions, where you rarely semantic-search summaries
+    # and want to stay off the model entirely).
+    if embed:
+        try:
+            vec = embedder.embed([text])[0]
+            store.add_embeddings(SUMMARY, SUMMARY_TEXT_COL, {sid: vec})
+        except Exception:
+            # Embedding is optional; failure shouldn't block the write
+            pass
 
     # Optional tag application
     for tag in tags:

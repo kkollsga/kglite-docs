@@ -82,9 +82,11 @@ class Store:
             f"MATCH (n:{node_type}) WHERE n.id IN $ids RETURN n.id AS id",
             params={"ids": list(ids)},
         )
-        # cypher returns a polars DataFrame
+        # cypher returns a kglite ResultView / polars-like frame; index access
+        # is dynamic, so treat it as Any for the column lookup.
+        rv: Any = df
         try:
-            return set(df["id"].to_list())  # type: ignore[union-attr]
+            return set(rv["id"].to_list())
         except Exception:
             return set()
 

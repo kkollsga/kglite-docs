@@ -11,7 +11,7 @@ import contextlib
 from collections.abc import Iterable
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 from kglite_docs import cluster as cluster_mod
 from kglite_docs import context as context_mod
@@ -20,6 +20,7 @@ from kglite_docs import export as export_mod
 from kglite_docs import ocr as ocr_mod
 from kglite_docs import quality as quality_mod
 from kglite_docs import review as review_mod
+from kglite_docs import study as study_mod
 from kglite_docs import translate as translate_mod
 from kglite_docs.activity import (
     agent_activity as _agent_activity,
@@ -42,7 +43,11 @@ from kglite_docs.activity import (
 from kglite_docs.embed import make_embedder
 from kglite_docs.ingest.pipeline import IngestResult
 from kglite_docs.ingest.pipeline import ingest_document as _ingest_doc
-from kglite_docs.schema import CHUNK, CHUNK_TEXT_COL
+from kglite_docs.schema import (
+    CHUNK,
+    CHUNK_TEXT_COL,
+    LABEL_EMBEDDED,
+)
 from kglite_docs.store import Store
 from kglite_docs.tagging import (
     chunks_by_tag as _chunks_by_tag,
@@ -61,13 +66,17 @@ from kglite_docs.types import (
     AgentConfig,
     AgentKind,
     AgentRow,
+    AssessmentVerdict,
     ChunkDetail,
     ClusterAlgorithm,
+    ComparisonQueryResult,
+    ComparisonResult,
     ComposedContext,
     DocumentDetail,
     DocumentRow,
     ExportFormat,
     GroundingReport,
+    Ledger,
     OcrStatus,
     PendingOcrRow,
     ReviewStats,
@@ -76,6 +85,9 @@ from kglite_docs.types import (
     ReviewTicketRow,
     ReviewVerdict,
     SearchHit,
+    Stance,
+    StudyRow,
+    StudyStatus,
     SummaryDepth,
     SummaryRow,
     SummaryStatus,
@@ -163,6 +175,7 @@ class Corpus:
         source_uri: str | None = None,
         metadata: dict[str, object] | None = None,
         format: str | None = None,
+        embed: bool = False,
     ) -> IngestResult:
         """Ingest a document. Three modes:
 
@@ -173,9 +186,16 @@ class Corpus:
         - ``ingest("doc.bin", format="md")`` — file path with explicit
           format hint when the extension doesn't match.
 
+        Embedding is **opt-in**. By default (``embed=False``) ingest does
+        not touch the embedding model — it parses, chunks, and writes the
+        graph, leaving ready chunks ``:Unembedded``. Call :meth:`index`
+        afterwards (or pass ``embed=True`` here) to compute vectors and
+        enable :meth:`search`. Non-semantic workflows (browse, cypher,
+        tag, review, OCR, export, translate) need no embeddings at all.
+
         Returns an :class:`IngestResult` with the assigned ``doc_id``
-        (sha256 of file or text bytes), chunk count, and OCR-pending
-        page count.
+        (sha256 of file or text bytes), chunk count, OCR-pending page
+        count, and how many chunks were embedded (0 unless ``embed=True``).
 
         Raises :class:`UnsupportedFormatError` for unknown formats and
         :class:`IngestError` for parse failures.
@@ -199,13 +219,14 @@ class Corpus:
                 return _ingest_doc(
                     self._store, self._embedder, tmp_path,
                     title=title, source_uri=source_uri or "",
-                    metadata=metadata, format=fmt,
+                    metadata=metadata, format=fmt, embed=embed,
                 )
             finally:
                 tmp_path.unlink(missing_ok=True)
         return _ingest_doc(
             self._store, self._embedder, path,  # type: ignore[arg-type]
-            title=title, source_uri=source_uri, metadata=metadata, format=format,
+            title=title, source_uri=source_uri, metadata=metadata,
+            format=format, embed=embed,
         )
 
     def ingest_dir(
@@ -214,10 +235,15 @@ class Corpus:
         *,
         recursive: bool = True,
         patterns: list[str] | None = None,
+        embed: bool = False,
     ) -> list[IngestResult]:
         """Ingest every supported file under ``directory``. By default
         scans for all known formats: PDF, DOCX, PPTX, MD, HTML, TXT, and
-        common image formats."""
+        common image formats.
+
+        As with :meth:`ingest`, embedding is opt-in (``embed=False``).
+        For bulk loads prefer the default and call :meth:`index` once at
+        the end — one batched embedding pass beats per-file embedding."""
         from kglite_docs.ingest.formats import SUPPORTED_FORMATS
         directory = Path(directory)
         if patterns is None:
@@ -231,13 +257,111 @@ class Corpus:
                     continue
                 seen.add(f)
                 try:
-                    results.append(self.ingest(f))
+                    results.append(self.ingest(f, embed=embed))
                 except Exception as exc:
                     import logging
                     logging.getLogger("kglite_docs").warning(
                         "ingest failed for %s: %s", f, exc,
                     )
         return results
+
+    # ─── indexing (embedding) ───────────────────────────────────────────────
+
+    def count_unembedded(self, *, doc_id: str | None = None) -> int:
+        """How many ready chunks are still awaiting embedding. Scope with
+        ``doc_id``. Tracked by the ``c.embedded`` boolean property (not a
+        removable label — see :meth:`index`)."""
+        preds = ["c.embedded = false"]
+        params: dict[str, Any] = {}
+        if doc_id:
+            preds.append("c.doc_id = $doc_id")
+            params["doc_id"] = doc_id
+        q = "MATCH (c:Chunk:Ready) WHERE " + " AND ".join(preds) + " RETURN count(c) AS n"
+        rows_ = _df_to_dicts(self._store.cypher(q, params=params))
+        return int(rows_[0]["n"]) if rows_ else 0
+
+    def index(
+        self,
+        *,
+        doc_id: str | None = None,
+        batch_size: int = 16,
+        max_chunks: int | None = None,
+        max_seconds: float | None = 30.0,
+    ) -> dict[str, Any]:
+        """Embed ready-but-unembedded chunks — the optional second phase
+        of ingestion that makes :meth:`search` work.
+
+        **Bounded and loop-friendly.** A single call does at most
+        ``max_seconds`` of work (wall-clock budget, default 30s) or
+        ``max_chunks`` chunks, whichever is hit first, then commits what
+        it embedded and returns ``pending > 0`` if more remain. This keeps
+        any one call comfortably under an MCP client's per-call timeout
+        even for a large multi-document corpus — the caller loops until
+        ``pending == 0``::
+
+            while corpus.index()["pending"]:
+                ...
+
+        Pass ``max_seconds=None`` (and ``max_chunks=None``) to drain
+        everything in one call when there's no timeout to worry about
+        (e.g. CLI preload). Idempotent: only touches chunks not yet
+        embedded (tracked by the ``c.embedded`` property), so looping or
+        re-running is safe. Scope to one document with ``doc_id``.
+
+        Chunks are embedded in length-sorted batches so each batch pads to
+        a similar sequence length (bge-m3 caps at 8192) — avoids a few long
+        chunks inflating the padding for a document's worth of short ones.
+        The ``:Embedded`` label is added (never removed) as chunks are
+        indexed; the pending side is the property, because kglite's
+        ``remove_label`` leaves the label-predicate index stale.
+
+        Returns ``{"embedded": n, "pending": remaining, "doc_id": ...}``.
+        """
+        import time
+
+        preds = ["c.embedded = false"]
+        params: dict[str, Any] = {}
+        if doc_id:
+            preds.append("c.doc_id = $doc_id")
+            params["doc_id"] = doc_id
+        q = (
+            "MATCH (c:Chunk:Ready) WHERE " + " AND ".join(preds)
+            + f" RETURN c.id AS id, c.{CHUNK_TEXT_COL} AS text"
+        )
+        pending = [r for r in _df_to_dicts(self._store.cypher(q, params=params)) if r.get("text")]
+        if not pending:
+            return {"embedded": 0, "pending": 0, "doc_id": doc_id}
+
+        # Group similar-length chunks together to minimise padding waste.
+        pending.sort(key=lambda r: len(r["text"]))
+        if max_chunks is not None and max_chunks > 0:
+            pending = pending[:max_chunks]
+
+        budget = max_seconds if (max_seconds and max_seconds > 0) else None
+        start = time.monotonic()
+        all_vecs: dict[str, list[float]] = {}
+        for i in range(0, len(pending), batch_size):
+            batch = pending[i : i + batch_size]
+            ids = [r["id"] for r in batch]
+            vecs = self._embedder.embed([r["text"] for r in batch])
+            all_vecs.update(zip(ids, vecs, strict=False))
+            # Stop once the wall-clock budget is spent (checked after each
+            # batch, so a call overshoots by at most one batch).
+            if budget is not None and (time.monotonic() - start) > budget:
+                break
+
+        embedded_ids = list(all_vecs.keys())
+        self._store.add_embeddings(CHUNK, CHUNK_TEXT_COL, all_vecs)
+        self._store.cypher(
+            "MATCH (c:Chunk) WHERE c.id IN $ids SET c.embedded = true",
+            params={"ids": embedded_ids},
+        )
+        self._store.add_label(CHUNK, embedded_ids, LABEL_EMBEDDED)
+        return {
+            "embedded": len(embedded_ids),
+            "pending": self.count_unembedded(doc_id=doc_id),
+            "doc_id": doc_id,
+        }
 
     # ─── documents ────────────────────────────────────────────────────────
 
@@ -268,7 +392,7 @@ class Corpus:
             """,
             params=params,
         )
-        return _df_to_dicts(df)
+        return cast(list[DocumentRow], _df_to_dicts(df))
 
     def get_document(self, doc_id: str) -> DocumentDetail | None:
         df = self._store.cypher(
@@ -289,7 +413,7 @@ class Corpus:
             params={"id": doc_id},
         )
         doc["toc"] = _df_to_dicts(toc_df)
-        return doc
+        return cast(DocumentDetail | None, doc)
 
     # ─── chunks ───────────────────────────────────────────────────────────
 
@@ -299,6 +423,7 @@ class Corpus:
         *,
         with_neighbors: bool = False,
         with_summaries: bool = False,
+        window: int = 0,
         agent_id: str | None = None,
     ) -> ChunkDetail | None:
         df = self._store.cypher(
@@ -327,11 +452,30 @@ class Corpus:
             )
             chunk["next_id"] = (_df_to_dicts(n_df) or [{}])[0].get("id")
             chunk["prev_id"] = (_df_to_dicts(p_df) or [{}])[0].get("id")
+        if window and window > 0:
+            # Read-context: the `window` chunks before and after in reading
+            # order (the NEXT_CHUNK spine), with text — so an agent can
+            # interpret an incoherent chunk via its neighbours in one call.
+            n = int(window)
+            before = _df_to_dicts(self._store.cypher(
+                f"MATCH (p:Chunk)-[:NEXT_CHUNK*1..{n}]->(c:Chunk {{id: $id}}) "
+                f"RETURN p.id AS id, p.{CHUNK_TEXT_COL} AS text, p.page_number AS page, "
+                "p.chunk_index AS chunk_index ORDER BY p.page_number, p.chunk_index",
+                params={"id": chunk_id},
+            ))
+            after = _df_to_dicts(self._store.cypher(
+                f"MATCH (c:Chunk {{id: $id}})-[:NEXT_CHUNK*1..{n}]->(nx:Chunk) "
+                f"RETURN nx.id AS id, nx.{CHUNK_TEXT_COL} AS text, nx.page_number AS page, "
+                "nx.chunk_index AS chunk_index ORDER BY nx.page_number, nx.chunk_index",
+                params={"id": chunk_id},
+            ))
+            chunk["context_before"] = before
+            chunk["context_after"] = after
         if with_summaries:
             chunk["summaries"] = self.get_summaries(chunk_id, target_kind=CHUNK)
         if agent_id:
             _record_view(self._store, agent_id=agent_id, target_id=chunk_id, target_kind=CHUNK, context="get_chunk")
-        return chunk
+        return cast(ChunkDetail | None, chunk)
 
     # ─── search ───────────────────────────────────────────────────────────
 
@@ -370,7 +514,7 @@ class Corpus:
         if with_summaries and hits:
             for h in hits:
                 h["summaries"] = self.get_summaries(h["id"], target_kind=CHUNK)
-        return hits
+        return cast(list[SearchHit], hits)
 
     def similar_chunks(self, chunk_id: str, *, top_k: int = 10) -> list[SearchHit]:
         df = self._store.cypher(
@@ -391,11 +535,87 @@ class Corpus:
         include_summaries: bool = True,
         agent_id: str | None = None,
     ) -> ComposedContext:
-        return context_mod.compose_context(
+        return cast(ComposedContext, context_mod.compose_context(
             self, query=query, max_tokens=max_tokens,
             per_doc_cap=per_doc_cap, include_summaries=include_summaries,
             agent_id=agent_id,
+        ))
+
+    def compare_documents(
+        self,
+        doc_a: str,
+        doc_b: str,
+        *,
+        queries: list[str],
+        top_k_per_query: int = 5,
+        max_tokens_per_query: int = 2000,
+        agent_id: str | None = None,
+    ) -> ComparisonResult:
+        """Side-by-side cross-document retrieval.
+
+        For each query, returns the top hits from `doc_a` and `doc_b`
+        independently, plus a budgeted merged context bundle ready to
+        hand to a downstream LLM that's writing a comparison.
+
+        `queries` is a list of *axes* you want to compare on — e.g.
+        ``["retrieval architecture", "training objective",
+        "evaluation metrics"]`` for two papers. 3–7 queries is the
+        sweet spot.
+
+        Returns a `ComparisonResult` dict:
+
+            {
+              "doc_a_id": ..., "doc_a_title": ...,
+              "doc_b_id": ..., "doc_b_title": ...,
+              "queries": [
+                {
+                  "query": "...",
+                  "doc_a_hits": [...],   # top_k_per_query
+                  "doc_b_hits": [...],
+                  "merged_context": {used_tokens, items}   # ComposedContext
+                },
+                ...
+              ]
+            }
+        """
+        # Hydrate titles once
+        meta_df = self._store.cypher(
+            "MATCH (d:Document) WHERE d.id IN $ids "
+            "RETURN d.id AS id, d.title AS title",
+            params={"ids": [doc_a, doc_b]},
         )
+        titles: dict[str, str] = {
+            r["id"]: r.get("title", "") for r in _df_to_dicts(meta_df)
+        }
+        per_query: list[dict[str, Any]] = []
+        for q in queries:
+            doc_a_hits = self.search(
+                q, top_k=top_k_per_query,
+                filters={"doc_id": doc_a}, agent_id=agent_id,
+            )
+            doc_b_hits = self.search(
+                q, top_k=top_k_per_query,
+                filters={"doc_id": doc_b}, agent_id=agent_id,
+            )
+            # Merged context across both docs with the per-query budget,
+            # `per_doc_cap` ensures balanced representation.
+            merged = self.compose_context(
+                q,
+                max_tokens=max_tokens_per_query,
+                per_doc_cap=max(2, top_k_per_query // 2),
+                agent_id=None,  # don't double-count views
+            )
+            per_query.append({
+                "query": q,
+                "doc_a_hits": doc_a_hits,
+                "doc_b_hits": doc_b_hits,
+                "merged_context": merged,
+            })
+        return {
+            "doc_a_id": doc_a, "doc_a_title": titles.get(doc_a, ""),
+            "doc_b_id": doc_b, "doc_b_title": titles.get(doc_b, ""),
+            "queries": cast(list[ComparisonQueryResult], per_query),
+        }
 
     # ─── enrichments ──────────────────────────────────────────────────────
 
@@ -445,10 +665,10 @@ class Corpus:
         status: SummaryStatus | None = None,
         depth: SummaryDepth | None = None,
     ) -> list[SummaryRow]:
-        return enrich_mod.get_summaries(
+        return cast(list[SummaryRow], enrich_mod.get_summaries(
             self._store, target_id=target_id, target_kind=target_kind,
             status=status, depth=depth,
-        )
+        ))
 
     def find_consensus(self, query: str, *, top_k: int = 20) -> list[dict[str, Any]]:
         return enrich_mod.find_consensus(self._store, self._embedder, query=query, top_k=top_k)
@@ -473,7 +693,7 @@ class Corpus:
         return _untag_chunk(self._store, chunk_id=chunk_id, tag_name=tag_name, agent_id=agent_id)
 
     def list_tags(self, **filters: Any) -> list[TagRow]:
-        return _list_tags(self._store, **filters)
+        return cast(list[TagRow], _list_tags(self._store, **filters))
 
     def chunks_by_tag(self, tag_name: str, *, limit: int = 100) -> list[dict[str, Any]]:
         return _chunks_by_tag(self._store, tag_name=tag_name, limit=limit)
@@ -509,22 +729,22 @@ class Corpus:
         config to launch your LLM call — the agent_id you then use
         for subsequent `add_summary` / `complete_review` / etc.
         will be attributed back to this template."""
-        return _upsert_agent(
+        return cast(AgentConfig, _upsert_agent(
             self._store, agent_id=agent_id, kind=kind, model=model,
             role=role, system_prompt=system_prompt,
             tools=tools, context=context, description=description,
-        )
+        ))
 
     def get_agent(self, agent_id: str) -> AgentConfig:
         """Full agent config — template + counters. Empty dict if the
         agent isn't registered yet."""
-        return _get_agent(self._store, agent_id=agent_id)
+        return cast(AgentConfig, _get_agent(self._store, agent_id=agent_id))
 
     def list_agents(
         self, *, role: str | None = None, kind: AgentKind | None = None,
     ) -> list[AgentRow]:
         """List configured agents, optionally filtered by role or kind."""
-        return _list_agents(self._store, role=role, kind=kind)
+        return cast(list[AgentRow], _list_agents(self._store, role=role, kind=kind))
 
     def agent_activity(
         self,
@@ -536,10 +756,10 @@ class Corpus:
         """Everything this agent has done in the corpus — optionally
         scoped to one target node. Buckets: views, summaries, tags,
         translations, review_events, verification_events."""
-        return _agent_activity(
+        return cast(AgentActivity, _agent_activity(
             self._store, agent_id=agent_id,
             target_id=target_id, limit=limit,
-        )
+        ))
 
     def record_view(
         self, chunk_id: str, agent_id: str, *, context: str = ""
@@ -555,16 +775,16 @@ class Corpus:
         """Coverage summary: which documents have un-OCR'd pages, and
         what fraction of the corpus is still pending. Pass `doc_id` to
         narrow to one document."""
-        return ocr_mod.ocr_status(self._store, doc_id=doc_id)
+        return cast(OcrStatus, ocr_mod.ocr_status(self._store, doc_id=doc_id))
 
     def list_pending_ocr(
         self, *, doc_id: str | None = None, limit: int = 20,
         include_images: bool = True, dpi: int = 200,
     ) -> list[PendingOcrRow]:
-        return ocr_mod.list_pending_ocr(
+        return cast(list[PendingOcrRow], ocr_mod.list_pending_ocr(
             self._store, doc_id=doc_id, limit=limit,
             include_images=include_images, dpi=dpi,
-        )
+        ))
 
     def submit_ocr(
         self,
@@ -607,9 +827,9 @@ class Corpus:
         *,
         threshold: float = 0.5,
     ) -> GroundingReport:
-        return quality_mod.check_grounding(
+        return cast(GroundingReport, quality_mod.check_grounding(
             self._store, self._embedder, summary_id=summary_id, threshold=threshold,
-        )
+        ))
 
     def verify_claim(
         self,
@@ -749,10 +969,10 @@ class Corpus:
         """Atomic 'pull from the queue': finds the highest-priority `new`
         ticket and claims it for `agent_id`. Returns the ticket with the
         target hydrated, or `None` if the queue is empty."""
-        return review_mod.claim_next(
+        return cast(ReviewTicketDetail | None, review_mod.claim_next(
             self._store, agent_id=agent_id,
             target_kind=target_kind, min_priority=min_priority,
-        )
+        ))
 
     def unclaim_review(
         self, ticket_id: str, *, agent_id: str, reason: str = "",
@@ -787,24 +1007,121 @@ class Corpus:
         limit: int = 50,
     ) -> list[ReviewTicketRow]:
         """List tickets with their current event-sourced status."""
-        return review_mod.list_queue(
+        return cast(list[ReviewTicketRow], review_mod.list_queue(
             self._store, status=status, target_kind=target_kind,
             agent_id=agent_id, limit=limit,
-        )
+        ))
 
     def get_review_ticket(
         self, ticket_id: str, *, with_target: bool = True, with_events: bool = True,
     ) -> ReviewTicketDetail | None:
         """Full ticket detail including the target node and the
         immutable event audit trail."""
-        return review_mod.get_ticket(
+        return cast(ReviewTicketDetail | None, review_mod.get_ticket(
             self._store, ticket_id=ticket_id,
             with_target=with_target, with_events=with_events,
-        )
+        ))
 
     def review_stats(self) -> ReviewStats:
         """Kanban board summary: counts per status + per-agent in-review."""
-        return review_mod.stats(self._store)
+        return cast(ReviewStats, review_mod.stats(self._store))
+
+    # ─── evidence study ───────────────────────────────────────────────────
+
+    def define_study(
+        self, question: str, *, created_by: str,
+        title: str | None = None, status: StudyStatus = "open",
+    ) -> str:
+        """Create a Study (a question/claim to gather evidence for/against).
+        Returns the study id. See `assess` / `study_ledger` / `verify_assessment`."""
+        return study_mod.define_study(
+            self._store, question=question, title=title,
+            created_by=created_by, status=status,
+        )
+
+    def assess(
+        self, study_id: str, chunk_id: str, *,
+        stance: Stance, weight: float, agent_id: str,
+        rationale: str = "", model: str = "",
+        context_chunk_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Record stance (supports/against/neutral) + probative weight [0,1] +
+        rationale on a chunk toward a study. Append-only; never embeds.
+
+        `context_chunk_ids`: neighbor chunks read to interpret the focal one;
+        recorded so retrieval pulls the span and they're excluded from the
+        work-list (no double-judging)."""
+        return study_mod.assess(
+            self._store, study_id=study_id, chunk_id=chunk_id,
+            stance=stance, weight=weight, rationale=rationale,
+            agent_id=agent_id, model=model, context_chunk_ids=context_chunk_ids,
+        )
+
+    def study_ledger(
+        self, study_id: str, *,
+        stance: Stance | None = None, min_weight: float | None = None,
+        verified_only: bool = False, limit: int = 200,
+    ) -> Ledger:
+        """Weight-ranked evidence ledger for a study + support/against tallies.
+        Pass `stance="supports"`/`"against"` to retrieve just that side."""
+        return cast(Ledger, study_mod.ledger(
+            self._store, study_id=study_id, stance=stance,
+            min_weight=min_weight, verified_only=verified_only, limit=limit,
+        ))
+
+    def verify_assessment(
+        self, assessment_id: str, *,
+        verdict: AssessmentVerdict, verifier_agent_id: str, notes: str = "",
+    ) -> dict[str, Any]:
+        """Second-agent check of an assessment: verified / disputed / duplicate.
+        Self-verification is rejected."""
+        return study_mod.verify_assessment(
+            self._store, assessment_id=assessment_id, verdict=verdict,
+            verifier_agent_id=verifier_agent_id, notes=notes,
+        )
+
+    def conclude_study(
+        self, study_id: str, text: str, *,
+        agent_id: str, model: str = "", embed: bool = False,
+    ) -> str:
+        """Write a conclusion (stored as a verifiable Summary on the Study)."""
+        return study_mod.conclude_study(
+            self._store, self._embedder, study_id=study_id, text=text,
+            agent_id=agent_id, model=model, embed=embed,
+        )
+
+    def list_studies(
+        self, *, status: StudyStatus | None = None, created_by: str | None = None,
+    ) -> list[StudyRow]:
+        """List studies that have been run (newest first)."""
+        return cast(list[StudyRow], study_mod.list_studies(self._store, status=status, created_by=created_by))
+
+    def get_study(self, study_id: str) -> StudyRow | None:
+        """Study metadata + tallies + its conclusion summaries."""
+        return cast(StudyRow | None, study_mod.get_study(self._store, study_id=study_id))
+
+    def next_unassessed(
+        self, study_id: str, *,
+        doc_id: str | None = None, agent_id: str | None = None, limit: int = 20,
+        ttl_seconds: int = 1800,
+    ) -> list[dict[str, Any]]:
+        """Work-list of chunks not yet assessed for this study. When
+        ``agent_id`` is given, atomically *claims* (checks out) the returned
+        chunks so parallel analysts don't overlap; without it, a read-only
+        preview. Claims auto-expire after ``ttl_seconds``."""
+        return study_mod.next_unassessed(
+            self._store, study_id=study_id, doc_id=doc_id,
+            agent_id=agent_id, limit=limit, ttl_seconds=ttl_seconds,
+        )
+
+    def reopen_study(self, study_id: str, *, agent_id: str) -> dict[str, Any]:
+        """Flip a study back to open for deeper analysis."""
+        return study_mod.reopen_study(self._store, study_id=study_id, agent_id=agent_id)
+
+    def delete_study(self, study_id: str) -> dict[str, Any]:
+        """Cascade-delete a study + its assessments, verification events, and
+        conclusions. Destructive."""
+        return study_mod.delete_study(self._store, study_id=study_id)
 
     # ─── cypher escape hatch ──────────────────────────────────────────────
 

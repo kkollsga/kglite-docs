@@ -15,7 +15,9 @@ def _make_corpus_with_text(corpus: Corpus, tmp_path: Path) -> str:
         "# Topic C\n\nAttention is the core building block of transformers.\n",
         encoding="utf-8",
     )
-    return corpus.ingest(p).doc_id
+    doc_id = corpus.ingest(p).doc_id
+    corpus.index()
+    return doc_id
 
 
 def test_search_returns_hits_in_descending_score(corpus: Corpus, tmp_path: Path) -> None:
@@ -38,6 +40,7 @@ def test_search_filters(corpus: Corpus, tmp_path: Path) -> None:
     other = tmp_path / "other.md"
     other.write_text("# Foo\n\nUnrelated content here.\n", encoding="utf-8")
     corpus.ingest(other)
+    corpus.index()
     hits = corpus.search("retrieval", top_k=10, filters={"doc_id": doc1})
     assert hits and all(h["doc_id"] == doc1 for h in hits)
 
@@ -55,6 +58,7 @@ def test_compose_context_respects_budget(corpus: Corpus, tmp_path: Path) -> None
     body = "# H\n\n" + "\n\n".join(f"Paragraph {i} with content." for i in range(30))
     p.write_text(body, encoding="utf-8")
     corpus.ingest(p)
+    corpus.index()
     bundle = corpus.compose_context("Paragraph", max_tokens=50)
     assert bundle["used_tokens"] <= 50
     assert all("text" in item for item in bundle["items"])

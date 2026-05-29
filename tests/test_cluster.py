@@ -16,6 +16,7 @@ def _ingest_two_topics(corpus: Corpus, tmp_path: Path) -> None:
     p = tmp_path / "c.md"
     p.write_text("\n\n".join(paragraphs), encoding="utf-8")
     corpus.ingest(p)
+    corpus.index()
 
 
 def test_kmeans_clustering_runs(corpus: Corpus, tmp_path: Path) -> None:

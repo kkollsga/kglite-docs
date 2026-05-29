@@ -25,6 +25,7 @@ from kglite_docs.schema import (
     DOCUMENT,
     HAS_CHUNK,
     HAS_PAGE,
+    LABEL_EMBEDDED,
     NEXT_CHUNK,
     PAGE,
     label_for,
@@ -47,6 +48,7 @@ class IngestResult:
     chunk_count: int
     ocr_pending_pages: int
     format: str = ""
+    embedded: int = 0  # chunks embedded during this ingest (0 unless embed=True)
 
 
 def ingest_pdf(
@@ -57,11 +59,12 @@ def ingest_pdf(
     source_uri: str | None = None,
     title: str | None = None,
     metadata: dict[str, object] | None = None,
+    embed: bool = False,
 ) -> IngestResult:
     """Back-compat alias; new code should prefer `ingest_document`."""
     return ingest_document(
         store, embedder, path,
-        source_uri=source_uri, title=title, metadata=metadata,
+        source_uri=source_uri, title=title, metadata=metadata, embed=embed,
     )
 
 
@@ -93,10 +96,18 @@ def ingest_document(
     title: str | None = None,
     metadata: dict[str, object] | None = None,
     format: str | None = None,
+    embed: bool = False,
 ) -> IngestResult:
     """Ingest any supported document format (PDF, DOCX, PPTX, MD, HTML,
     TXT, images). Format is auto-detected from the extension; pass
-    `format=` to override."""
+    `format=` to override.
+
+    Embedding is **opt-in** (`embed=False` by default): ingest parses,
+    chunks, and writes the graph without touching the embedding model, so
+    it never blocks on model load / embedding compute and non-semantic
+    workflows pay nothing. Ready chunks are marked ``:Unembedded``; run
+    :func:`Corpus.index` (or pass ``embed=True``) to compute vectors and
+    enable ``search``."""
     path = Path(path)
     doc_id = file_hash(path)
     fmt = (format or detect_format(path)).lower()
@@ -115,6 +126,7 @@ def ingest_document(
             chunk_count=_count_chunks(store, doc_id),
             ocr_pending_pages=_count_pending_ocr(store, doc_id),
             format=fmt,
+            embedded=_count_embedded(store, doc_id),
         )
 
     pages = parse_document(path, format=fmt)
@@ -198,6 +210,7 @@ def ingest_document(
             "token_count": ch.token_count,
             "headings_json": _safe_json(ch.headings),
             "status": status,                   # property still written
+            "embedded": False,                  # flipped by index() / embed=True
             "text_hash": ch.text_hash_value if ch.text else "",
             "view_count": 0,
             "last_viewed_at": "",
@@ -212,6 +225,13 @@ def ingest_document(
         status_label = label_for("chunk.status", status)
         if status_label:
             store.add_label(CHUNK, ids, status_label)
+
+    # Embedding lifecycle is tracked by the boolean `c.embedded` property
+    # (set False above). The work-list is "ready chunks where embedded =
+    # false"; index() adds the additive :Embedded label as it goes. We do
+    # NOT use a removable :Unembedded label — kglite's remove_label leaves
+    # the label-predicate index stale (labels(c) updates, MATCH (:Label)
+    # does not), so a removed-label MATCH would over-report.
 
     # Edges: Page→Chunk, Document→Chunk, and NEXT_CHUNK in reading order
     page_chunk_edges = [
@@ -232,12 +252,25 @@ def ingest_document(
         ]
         store.upsert_edges(NEXT_CHUNK, next_edges, source_type=CHUNK, target_type=CHUNK)
 
-    # Embed and store
-    embeddable = [(r["id"], r[CHUNK_TEXT_COL]) for r in chunk_rows if r["status"] == CHUNK_STATUS_READY and r[CHUNK_TEXT_COL]]
-    if embeddable:
-        ids, texts = zip(*embeddable, strict=False)
-        vecs = embedder.embed(list(texts))
-        store.add_embeddings(CHUNK, CHUNK_TEXT_COL, dict(zip(ids, vecs, strict=False)))
+    # Optional inline embed. The default (embed=False) leaves chunks
+    # :Unembedded for a later index() pass — keeping ingest off the model
+    # entirely. embed=True is the one-shot convenience path.
+    embedded_count = 0
+    if embed:
+        embeddable = [
+            (r["id"], r[CHUNK_TEXT_COL]) for r in chunk_rows
+            if r["status"] == CHUNK_STATUS_READY and r[CHUNK_TEXT_COL]
+        ]
+        if embeddable:
+            emb_ids, texts = zip(*embeddable, strict=False)
+            vecs = embedder.embed(list(texts))
+            store.add_embeddings(CHUNK, CHUNK_TEXT_COL, dict(zip(emb_ids, vecs, strict=False)))
+            store.cypher(
+                "MATCH (c:Chunk) WHERE c.id IN $ids SET c.embedded = true",
+                params={"ids": list(emb_ids)},
+            )
+            store.add_label(CHUNK, list(emb_ids), LABEL_EMBEDDED)
+            embedded_count = len(emb_ids)
 
     return IngestResult(
         doc_id=doc_id,
@@ -246,6 +279,7 @@ def ingest_document(
         chunk_count=len(chunk_rows),
         ocr_pending_pages=sum(1 for p in pages if p.needs_ocr),
         format=fmt,
+        embedded=embedded_count,
     )
 
 
@@ -260,6 +294,15 @@ def _chunk_id(doc_id: str, page_number: int, chunk_index: int) -> str:
 def _count_chunks(store: Store, doc_id: str) -> int:
     r = store.cypher(
         "MATCH (d:Document {id: $id})-[:HAS_CHUNK]->(c:Chunk) RETURN count(c) AS n",
+        params={"id": doc_id},
+    )
+    rs = _rows(r)
+    return int(rs[0]["n"]) if rs else 0
+
+
+def _count_embedded(store: Store, doc_id: str) -> int:
+    r = store.cypher(
+        "MATCH (d:Document {id: $id})-[:HAS_CHUNK]->(c:Chunk:Embedded) RETURN count(c) AS n",
         params={"id": doc_id},
     )
     rs = _rows(r)

@@ -123,7 +123,7 @@ def _parse_md_string(text: str) -> list[PageContent]:
 
 
 def _parse_docx(path: Path) -> list[PageContent]:
-    from docx import Document as DocxDocument  # type: ignore
+    from docx import Document as DocxDocument
 
     doc = DocxDocument(str(path))
     current_section: list[str] = []
@@ -163,7 +163,7 @@ def _parse_docx(path: Path) -> list[PageContent]:
 
 
 def _parse_pptx(path: Path) -> list[PageContent]:
-    from pptx import Presentation  # type: ignore
+    from pptx import Presentation
 
     pres = Presentation(str(path))
     pages: list[PageContent] = []

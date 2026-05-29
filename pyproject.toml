@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "kglite-docs"
 # Bump this and push to main — the release.yml workflow checks PyPI
 # and publishes if the version is new. No git tag needed.
-version = "0.0.4"
+version = "0.0.6"
 description = "Agent-first PDF knowledge base — chunk, embed, cluster, enrich, and serve over MCP. Built on kglite + bge-m3."
 readme = "README.md"
 license = "MIT"
@@ -29,9 +29,9 @@ classifiers = [
     "Topic :: Text Processing :: Indexing",
 ]
 dependencies = [
-    "kglite>=0.10.5",
+    "kglite>=0.10.9",
     "mcp>=1.0",
-    "mcp-methods>=0.3",
+    "mcp-methods>=0.3.40",
     "pymupdf4llm>=0.0.17",
     "pymupdf>=1.24",
     "tokenizers>=0.20",
@@ -101,6 +101,21 @@ python_version = "3.10"
 strict = true
 warn_unused_ignores = true
 exclude = ["tests/", "build/", "dist/"]
+
+# Third-party libraries that ship no type information.
+[[tool.mypy.overrides]]
+module = ["reportlab.*", "pymupdf4llm", "pymupdf", "fitz", "docx", "docx.*", "pptx", "pptx.*", "markdownify", "pandas"]
+ignore_missing_imports = true
+
+# FastMCP's `@app.tool()` is an untyped decorator; the dispatchers are thin shims.
+[[tool.mypy.overrides]]
+module = ["kglite_docs.mcp_server.tools"]
+disallow_untyped_decorators = false
+
+# Wrapper modules around untyped document libraries (python-docx, pptx, pymupdf).
+[[tool.mypy.overrides]]
+module = ["kglite_docs.ingest.parser", "kglite_docs.ingest.formats", "kglite_docs.export"]
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

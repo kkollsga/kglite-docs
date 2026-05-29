@@ -1,0 +1,589 @@
+"""Evidence studies — judge document chunks for/against a stored question.
+
+A `Study` is a question/claim. Agents record an `Assessment` on each chunk:
+a stance (supports / against / neutral), a probative `weight` in [0, 1], and a
+free-text `rationale`. Assessments are reified nodes (like `Tagging` /
+`ReviewEvent`) so multiple agents can co-assess the same chunk and each
+assessment is independently verifiable.
+
+Design notes:
+
+- **Append-only, latest-wins.** Re-assessing the same (study, chunk, agent)
+  writes a new `Assessment`; reads dedup to the most recent. This sidesteps
+  kglite's String-`SET` hazard, gives free revision history, and matches the
+  review/verify event-sourcing house style.
+- **Off the embedding path.** `assess` never calls the embedder — rationale is
+  a plain property. A whole study can run on an un-`index`ed corpus.
+- **Work-list = absence**, not tickets: "chunks lacking an Assessment for this
+  study" (mirrors the `embedded` / `count_unembedded` pattern). Resumable.
+- **Stance / status / verification are secondary labels** for index-speed
+  filtering (`MATCH (a:Assessment:Supports:Verified)`).
+- The study **conclusion** is a `Summary` targeting the `Study` (reuses
+  `enrich.add_summary` / `verify_summary`).
+"""
+
+from __future__ import annotations
+
+import threading
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from kglite_docs.activity import register_agent
+from kglite_docs.errors import InvalidEnumError, SelfVerificationError
+from kglite_docs.schema import (
+    AGENT,
+    ASSESSED_AS,
+    ASSESSMENT,
+    ASSESSMENT_UNVERIFIED,
+    AUTHORED,
+    CHECKED_OUT,
+    CHECKOUT,
+    CHUNK,
+    CLAIM_TTL_SECONDS,
+    HAS_VERIFICATION,
+    HOLDS,
+    OF_STUDY,
+    STUDY,
+    STUDY_CLOSED,
+    STUDY_OPEN,
+    USED_CONTEXT,
+    VALID_ASSESSMENT_VERDICTS,
+    VALID_STANCES,
+    VERIFICATION_EVENT,
+    VERIFIED_BY,
+    label_for,
+    labels_for,
+)
+from kglite_docs.store import Store
+from kglite_docs.store import rows as _df_dicts
+
+# Reverse map: stance label → user-facing stance string.
+_STANCE_BY_LABEL = {label_for("study.stance", s): s for s in VALID_STANCES}
+# Reverse map: verification label → status string.
+_VSTATUS_BY_LABEL = {
+    "Unverified": "unverified", "Verified": "verified",
+    "Disputed": "disputed", "Duplicate": "duplicate",
+}
+_ASSESS_LABEL_SET = set(labels_for("assessment.verification_status"))
+_STANCE_LABEL_SET = set(labels_for("study.stance"))
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# Serialises the GC→select→claim sequence so concurrent in-process `next`
+# calls don't hand the same chunks to two agents. (Cross-process safety
+# comes from the claim being persisted: a second server reload sees it.)
+_checkout_lock = threading.Lock()
+
+
+# ─── studies ────────────────────────────────────────────────────────────────
+
+
+def define_study(
+    store: Store,
+    *,
+    question: str,
+    title: str | None = None,
+    created_by: str,
+    status: str = STUDY_OPEN,
+) -> str:
+    """Create a `Study` (a question/claim agents will assess evidence for).
+    Returns the study id."""
+    question = (question or "").strip()
+    if not question:
+        raise InvalidEnumError("study question must be non-empty")
+    if status not in (STUDY_OPEN, STUDY_CLOSED):
+        raise InvalidEnumError(f"invalid study status: {status!r}")
+    register_agent(store, agent_id=created_by)
+    sid = "study_" + uuid.uuid4().hex[:16]
+    store.upsert_nodes(
+        STUDY,
+        [{
+            "id": sid,
+            "title": (title or question)[:120],
+            "question": question,
+            "created_by": created_by,
+            "created_at": _now(),
+            "status": status,
+        }],
+    )
+    status_label = label_for("study.status", status)
+    if status_label:
+        store.add_label(STUDY, [sid], status_label)
+    return sid
+
+
+def list_studies(
+    store: Store, *, status: str | None = None, created_by: str | None = None,
+) -> list[dict[str, Any]]:
+    """List studies (newest first), each with a cheap assessment count."""
+    status_label = label_for("study.status", status) if status else ""
+    label_clause = f":{status_label}" if status_label else ""
+    where: list[str] = []
+    params: dict[str, Any] = {}
+    if created_by:
+        where.append("s.created_by = $cb")
+        params["cb"] = created_by
+    where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+    df = store.cypher(
+        f"MATCH (s:Study{label_clause}) {where_clause} "
+        "OPTIONAL MATCH (s)<-[:OF_STUDY]-(a:Assessment) "
+        "RETURN s.id AS id, s.title AS title, s.question AS question, "
+        "s.status AS status, s.created_by AS created_by, "
+        "s.created_at AS created_at, count(a) AS assessment_count "
+        "ORDER BY s.created_at DESC",
+        params=params,
+    )
+    return _df_dicts(df)
+
+
+def get_study(store: Store, *, study_id: str) -> dict[str, Any] | None:
+    """Study metadata + tallies + its conclusion summaries. None if missing."""
+    df = store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.id AS id, s.title AS title, "
+        "s.question AS question, s.status AS status, "
+        "s.created_by AS created_by, s.created_at AS created_at",
+        params={"id": study_id},
+    )
+    rows = _df_dicts(df)
+    if not rows:
+        return None
+    study = rows[0]
+    study["tallies"] = _tallies(store, study_id)
+    # Conclusions are Summaries targeting the Study.
+    from kglite_docs.enrich import get_summaries
+    study["conclusions"] = get_summaries(
+        store, target_id=study_id, target_kind=STUDY,
+    )
+    return study
+
+
+def reopen_study(store: Store, *, study_id: str, agent_id: str) -> dict[str, Any]:
+    """Flip a study back to `open` (via label swap) for deeper analysis."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    register_agent(store, agent_id=agent_id)
+    store.cypher(
+        "MATCH (s:Study {id: $id}) SET s.status = $st",
+        params={"id": study_id, "st": STUDY_OPEN},
+    )
+    store.swap_label(
+        STUDY, [study_id],
+        add=label_for("study.status", STUDY_OPEN),
+        remove_any_of=labels_for("study.status"),
+    )
+    return {"study_id": study_id, "status": STUDY_OPEN}
+
+
+def conclude_study(
+    store: Store,
+    embedder: Any,
+    *,
+    study_id: str,
+    text: str,
+    agent_id: str,
+    model: str = "",
+    embed: bool = False,
+) -> str:
+    """Write a conclusion for the study — stored as a `Summary` on the `Study`
+    node (so it is attributed, revisable, and verifiable via `summary.verify`).
+    Defaults to no embedding. Returns the conclusion (Summary) id."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    from kglite_docs.enrich import add_summary
+    return add_summary(
+        store, embedder,
+        target_id=study_id, target_kind=STUDY, depth="document",
+        text=text, agent_id=agent_id, model=model, embed=embed,
+    )
+
+
+def delete_study(store: Store, *, study_id: str) -> dict[str, Any]:
+    """Cascade-delete a study: its Assessments, their VerificationEvents, and
+    its conclusion Summaries (+ their events). Destructive."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    counts = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) "
+        "OPTIONAL MATCH (s)<-[:OF_STUDY]-(a:Assessment) "
+        "OPTIONAL MATCH (a)-[:HAS_VERIFICATION]->(ae:VerificationEvent) "
+        "OPTIONAL MATCH (s)<-[:SUMMARIZES]-(c:Summary) "
+        "OPTIONAL MATCH (c)-[:HAS_VERIFICATION]->(ce:VerificationEvent) "
+        "RETURN count(DISTINCT a) AS assessments, "
+        "count(DISTINCT c) AS conclusions, "
+        "count(DISTINCT ae) + count(DISTINCT ce) AS events",
+        params={"id": study_id},
+    ))
+    # One-statement cascade: empty OPTIONAL MATCH branches resolve to NULL and
+    # are skipped by DETACH DELETE (kglite >= 0.10.8).
+    store.cypher(
+        "MATCH (s:Study {id: $id}) "
+        "OPTIONAL MATCH (s)<-[:OF_STUDY]-(a:Assessment) "
+        "OPTIONAL MATCH (a)-[:HAS_VERIFICATION]->(ae:VerificationEvent) "
+        "OPTIONAL MATCH (s)<-[:SUMMARIZES]-(c:Summary) "
+        "OPTIONAL MATCH (c)-[:HAS_VERIFICATION]->(ce:VerificationEvent) "
+        "DETACH DELETE s, a, ae, c, ce",
+        params={"id": study_id},
+    )
+    # Checkouts reference the study by property, not edge — clean separately.
+    store.cypher("MATCH (co:Checkout {study_id: $id}) DETACH DELETE co", params={"id": study_id})
+    c = counts[0] if counts else {}
+    return {
+        "deleted_study": study_id,
+        "assessments": int(c.get("assessments", 0)),
+        "conclusions": int(c.get("conclusions", 0)),
+        "events": int(c.get("events", 0)),
+    }
+
+
+# ─── assessments ──────────────────────────────────────────────────────────
+
+
+def assess(
+    store: Store,
+    *,
+    study_id: str,
+    chunk_id: str,
+    stance: str,
+    weight: float,
+    rationale: str = "",
+    agent_id: str,
+    model: str = "",
+    context_chunk_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Record one agent's stance + probative weight + rationale on a chunk,
+    toward a study's question. Append-only (latest wins). Never embeds.
+
+    `context_chunk_ids` are neighbor chunks the agent had to read to interpret
+    the focal chunk (e.g. an incoherent chunk understood only via the ones
+    around it). They're recorded as ``USED_CONTEXT`` edges so retrieval can
+    pull the full span later, and so they are **excluded from the work-list**
+    (no one re-judges a chunk that was already covered as context)."""
+    if stance not in VALID_STANCES:
+        raise InvalidEnumError(
+            f"invalid stance: {stance!r} (expected one of {sorted(VALID_STANCES)})"
+        )
+    try:
+        weight = float(weight)
+    except (TypeError, ValueError):
+        raise InvalidEnumError(f"weight must be a number in [0,1] (got {weight!r})") from None
+    if not 0.0 <= weight <= 1.0:
+        raise InvalidEnumError(f"weight must be in [0,1] (got {weight})")
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+
+    register_agent(store, agent_id=agent_id)
+    aid = "assess_" + uuid.uuid4().hex[:16]
+    store.upsert_nodes(
+        ASSESSMENT,
+        [{
+            "id": aid,
+            "title": f"{stance} ({weight:.2f}) {chunk_id}",
+            "study_id": study_id,
+            "chunk_id": chunk_id,
+            "stance": stance,
+            "weight": weight,
+            "rationale": rationale,
+            "by_agent": agent_id,
+            "model": model,
+            "created_at": _now(),
+            "verification_status": ASSESSMENT_UNVERIFIED,
+        }],
+    )
+    store.upsert_edges(
+        ASSESSED_AS, [{"src": chunk_id, "dst": aid}],
+        source_type=CHUNK, target_type=ASSESSMENT,
+    )
+    store.upsert_edges(
+        OF_STUDY, [{"src": aid, "dst": study_id}],
+        source_type=ASSESSMENT, target_type=STUDY,
+    )
+    store.upsert_edges(
+        AUTHORED, [{"src": agent_id, "dst": aid}],
+        source_type=AGENT, target_type=ASSESSMENT,
+    )
+    stance_label = label_for("study.stance", stance)
+    if stance_label:
+        store.add_label(ASSESSMENT, [aid], stance_label)
+    init_label = label_for("assessment.verification_status", ASSESSMENT_UNVERIFIED)
+    if init_label:
+        store.add_label(ASSESSMENT, [aid], init_label)
+    # Record neighbor chunks read to interpret the focal one (excluding the
+    # focal itself). These become USED_CONTEXT edges → backlink + dedup.
+    ctx = [cid for cid in (context_chunk_ids or []) if cid and cid != chunk_id]
+    if ctx:
+        store.upsert_edges(
+            USED_CONTEXT, [{"src": aid, "dst": cid} for cid in ctx],
+            source_type=ASSESSMENT, target_type=CHUNK,
+        )
+    return {
+        "assessment_id": aid, "study_id": study_id, "chunk_id": chunk_id,
+        "stance": stance, "weight": weight, "context_chunk_ids": ctx,
+    }
+
+
+def verify_assessment(
+    store: Store,
+    *,
+    assessment_id: str,
+    verdict: str,
+    verifier_agent_id: str,
+    notes: str = "",
+) -> dict[str, Any]:
+    """A second agent verifies an assessment: verified / disputed / duplicate.
+    Self-verification is rejected. Mirrors `enrich.verify_summary`."""
+    if verdict not in VALID_ASSESSMENT_VERDICTS:
+        raise InvalidEnumError(
+            f"invalid verdict: {verdict!r} (expected one of {sorted(VALID_ASSESSMENT_VERDICTS)})"
+        )
+    author_df = _df_dicts(store.cypher(
+        "MATCH (a:Agent)-[:AUTHORED]->(x:Assessment {id: $id}) RETURN a.id AS id",
+        params={"id": assessment_id},
+    ))
+    if not author_df:
+        raise InvalidEnumError(f"assessment not found: {assessment_id}")
+    if author_df[0]["id"] == verifier_agent_id:
+        raise SelfVerificationError(
+            f"agent {verifier_agent_id!r} can't verify assessment {assessment_id} — they authored it"
+        )
+
+    register_agent(store, agent_id=verifier_agent_id)
+    now = _now()
+    event_id = str(uuid.uuid4())
+    store.upsert_nodes(
+        VERIFICATION_EVENT,
+        [{
+            "id": event_id,
+            "title": f"{verdict} by {verifier_agent_id}",
+            "assessment_id": assessment_id,
+            "verdict": verdict,
+            "verifier_agent_id": verifier_agent_id,
+            "notes": notes,
+            "created_at": now,
+        }],
+    )
+    store.upsert_edges(
+        HAS_VERIFICATION, [{"src": assessment_id, "dst": event_id}],
+        source_type=ASSESSMENT, target_type=VERIFICATION_EVENT,
+    )
+    store.upsert_edges(
+        VERIFIED_BY, [{"src": assessment_id, "dst": verifier_agent_id}],
+        source_type=ASSESSMENT, target_type=AGENT,
+    )
+    store.upsert_edges(
+        AUTHORED, [{"src": verifier_agent_id, "dst": event_id}],
+        source_type=AGENT, target_type=VERIFICATION_EVENT,
+    )
+    store.swap_label(
+        ASSESSMENT, [assessment_id],
+        add=label_for("assessment.verification_status", verdict),
+        remove_any_of=labels_for("assessment.verification_status"),
+    )
+    return {
+        "assessment_id": assessment_id, "status": verdict,
+        "verified_at": now, "verified_by": verifier_agent_id, "event_id": event_id,
+    }
+
+
+# ─── retrieval ────────────────────────────────────────────────────────────
+
+
+def ledger(
+    store: Store,
+    *,
+    study_id: str,
+    stance: str | None = None,
+    min_weight: float | None = None,
+    verified_only: bool = False,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """Weight-ranked evidence ledger for a study — the orchestrator's one call.
+
+    Dedups to the latest assessment per (chunk, agent), ranks by weight DESC.
+    `stance` ("supports"/"against"/"neutral") and `verified_only` filter via
+    label predicates. Returns rows + support/against tallies.
+    """
+    meta = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.question AS question, s.status AS status",
+        params={"id": study_id},
+    ))
+    if not meta:
+        raise InvalidEnumError(f"study not found: {study_id}")
+
+    label_parts = ""
+    if stance:
+        if stance not in VALID_STANCES:
+            raise InvalidEnumError(f"invalid stance: {stance!r}")
+        label_parts += ":" + label_for("study.stance", stance)
+    if verified_only:
+        label_parts += ":" + label_for("assessment.verification_status", "verified")
+
+    params: dict[str, Any] = {"id": study_id, "lim": int(limit)}
+    where = ""
+    if min_weight is not None:
+        where = "WHERE latest.weight >= $minw"
+        params["minw"] = float(min_weight)
+
+    # Latest assessment per (chunk, agent): order by recency, take head.
+    df = store.cypher(
+        f"MATCH (c:Chunk)-[:ASSESSED_AS]->(a:Assessment{label_parts})-[:OF_STUDY]->(:Study {{id: $id}}) "
+        "WITH c, a.by_agent AS ag, a ORDER BY a.created_at DESC "
+        "WITH c, ag, collect(a)[0] AS latest "
+        f"{where} "
+        "RETURN latest.id AS assessment_id, c.id AS chunk_id, c.doc_id AS doc_id, "
+        "c.page_number AS page, latest.stance AS stance, latest.weight AS weight, "
+        "latest.rationale AS rationale, latest.by_agent AS by_agent, "
+        "labels(latest) AS labels, c.text AS text "
+        "ORDER BY weight DESC LIMIT $lim",
+        params=params,
+    )
+    rows = _df_dicts(df)
+    for r in rows:
+        node_labels = r.pop("labels", []) or []
+        r["verification_status"] = _verification_from_labels(node_labels)
+    # Attach each row's USED_CONTEXT span (the neighbor chunks the agent read
+    # to judge it) so retrieval can pull the full relevant span.
+    ids = [r["assessment_id"] for r in rows if r.get("assessment_id")]
+    if ids:
+        ctx_rows = _df_dicts(store.cypher(
+            "MATCH (a:Assessment)-[:USED_CONTEXT]->(ctx:Chunk) WHERE a.id IN $ids "
+            "RETURN a.id AS aid, collect(ctx.id) AS ctx_ids",
+            params={"ids": ids},
+        ))
+        ctx_map = {r["aid"]: r["ctx_ids"] for r in ctx_rows}
+        for r in rows:
+            r["context_chunk_ids"] = ctx_map.get(r["assessment_id"], [])
+    return {
+        "study_id": study_id,
+        "question": meta[0]["question"],
+        "status": meta[0]["status"],
+        "rows": rows,
+        "tallies": _tallies(store, study_id),
+    }
+
+
+def next_unassessed(
+    store: Store,
+    *,
+    study_id: str,
+    doc_id: str | None = None,
+    agent_id: str | None = None,
+    limit: int = 20,
+    ttl_seconds: int = CLAIM_TTL_SECONDS,
+) -> list[dict[str, Any]]:
+    """The work-list of chunks not yet assessed for this study, in reading
+    order.
+
+    **Punchcard semantics.** When `agent_id` is given, this atomically
+    *claims* the returned chunks for that agent (a "checkout"), excluding any
+    chunks already claimed by someone else — so parallel analysts never
+    overlap. Without `agent_id` it's a read-only preview (no claim).
+
+    Claims auto-expire after `ttl_seconds` (default 30 min) so an analyst that
+    pulls but never assesses doesn't lock chunks forever; assessing a chunk
+    excludes it regardless of claim (implicit release). Stale checkouts are
+    garbage-collected on the next claim.
+    """
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+
+    chunk_where = ["c.status = 'ready'"]
+    base_params: dict[str, Any] = {"sid": study_id, "lim": int(limit)}
+    if doc_id:
+        chunk_where.append("c.doc_id = $doc")
+        base_params["doc"] = doc_id
+    where_sql = " AND ".join(chunk_where)
+    # "Done for this study" = assessed as a focal chunk, OR already read as
+    # context for another chunk's assessment (so we never re-judge it).
+    not_done = (
+        "NOT EXISTS { MATCH (c)-[:ASSESSED_AS]->(:Assessment)-[:OF_STUDY]->(:Study {id: $sid}) } "
+        "AND NOT EXISTS { MATCH (c)<-[:USED_CONTEXT]-(:Assessment)-[:OF_STUDY]->(:Study {id: $sid}) }"
+    )
+
+    # Preview mode: just show unassessed chunks; don't claim, don't mutate.
+    if not agent_id:
+        df = store.cypher(
+            f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} "
+            "RETURN c.id AS id, c.doc_id AS doc_id, c.page_number AS page, "
+            "c.chunk_index AS chunk_index, c.text AS text, c.title AS title "
+            "ORDER BY c.doc_id, c.page_number, c.chunk_index LIMIT $lim",
+            params=base_params,
+        )
+        return _df_dicts(df)
+
+    # Claim mode: GC stale checkouts → select unassessed & unclaimed → punch.
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)).isoformat()
+    not_claimed = (
+        "NOT EXISTS { MATCH (c)<-[:CHECKED_OUT]-(:Checkout {study_id: $sid}) }"
+    )
+    with _checkout_lock:
+        # Expire abandoned checkouts (older than the TTL) for this study.
+        store.cypher(
+            "MATCH (co:Checkout) WHERE co.study_id = $sid AND co.at < $cutoff DETACH DELETE co",
+            params={"sid": study_id, "cutoff": cutoff},
+        )
+        rows = _df_dicts(store.cypher(
+            f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} AND {not_claimed} "
+            "RETURN c.id AS id, c.doc_id AS doc_id, c.page_number AS page, "
+            "c.chunk_index AS chunk_index, c.text AS text, c.title AS title "
+            "ORDER BY c.doc_id, c.page_number, c.chunk_index LIMIT $lim",
+            params=base_params,
+        ))
+        if rows:
+            register_agent(store, agent_id=agent_id)
+            co_id = "co_" + uuid.uuid4().hex[:16]
+            store.upsert_nodes(CHECKOUT, [{
+                "id": co_id, "title": f"checkout {agent_id} {study_id}",
+                "study_id": study_id, "by_agent": agent_id, "at": _now(),
+            }])
+            store.upsert_edges(
+                HOLDS, [{"src": agent_id, "dst": co_id}],
+                source_type=AGENT, target_type=CHECKOUT,
+            )
+            store.upsert_edges(
+                CHECKED_OUT, [{"src": co_id, "dst": r["id"]} for r in rows],
+                source_type=CHECKOUT, target_type=CHUNK,
+            )
+    return rows
+
+
+# ─── internals ────────────────────────────────────────────────────────────
+
+
+def _study_exists(store: Store, study_id: str) -> bool:
+    df = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.id AS id", params={"id": study_id},
+    ))
+    return bool(df)
+
+
+def _verification_from_labels(node_labels: list[str]) -> str:
+    for lbl in node_labels:
+        if lbl != "Unverified" and lbl in _ASSESS_LABEL_SET and lbl in _VSTATUS_BY_LABEL:
+            return _VSTATUS_BY_LABEL[lbl]
+    return "unverified"
+
+
+def _tallies(store: Store, study_id: str) -> dict[str, Any]:
+    """Counts + summed weight per stance, deduped to latest per (chunk, agent)."""
+    df = store.cypher(
+        "MATCH (c:Chunk)-[:ASSESSED_AS]->(a:Assessment)-[:OF_STUDY]->(:Study {id: $id}) "
+        "WITH c, a.by_agent AS ag, a ORDER BY a.created_at DESC "
+        "WITH c, ag, collect(a)[0] AS latest "
+        "WITH latest.stance AS stance, latest.weight AS wt "
+        "RETURN stance, count(*) AS n, sum(wt) AS w",
+        params={"id": study_id},
+    )
+    out: dict[str, Any] = {
+        "supports": 0, "against": 0, "neutral": 0,
+        "supports_weight": 0.0, "against_weight": 0.0, "neutral_weight": 0.0,
+    }
+    for r in _df_dicts(df):
+        st = r.get("stance")
+        if st in VALID_STANCES:
+            out[st] = int(r.get("n", 0))
+            out[f"{st}_weight"] = round(float(r.get("w", 0.0) or 0.0), 4)
+    return out

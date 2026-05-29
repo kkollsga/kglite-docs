@@ -459,7 +459,7 @@ def _record_event(
     authenticity: str = "",
 ) -> str:
     event_id = str(uuid.uuid4())
-    row = {
+    row: dict[str, Any] = {
         "id": event_id,
         "title": f"{event_type} by {agent_id}",
         "ticket_id": ticket_id,

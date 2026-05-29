@@ -13,6 +13,7 @@ def _ingest_md(corpus: Corpus, tmp_path: Path, name: str = "doc") -> str:
     p = tmp_path / f"{name}.md"
     p.write_text("# T\n\nFirst paragraph.\n\n# U\n\nSecond paragraph.\n", encoding="utf-8")
     corpus.ingest(p)
+    corpus.index()
     hits = corpus.search("First paragraph", top_k=1)
     assert hits
     return hits[0]["id"]

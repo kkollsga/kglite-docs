@@ -1,0 +1,12 @@
+name: kglite-docs
+instructions: |
+  Agent-first knowledge base for documents. Multi-format ingest (PDF, DOCX,
+  PPTX, MD, HTML, images), BAAI/bge-m3 embeddings, cross-checked summaries,
+  review kanban, grounding checks, and per-agent activity tracking.
+  Underlying storage is kglite — a typed Cypher graph database with native
+  vector search + clustering.
+
+# Auto-detect the `<basename>.skills/` directory (manifest.skills/) for
+# per-deployment skill methodology. Bundled framework defaults are
+# disabled — kglite-docs ships its own focused set.
+skills: true

@@ -11,6 +11,7 @@ def _ingest(corpus: Corpus, tmp_path: Path) -> str:
     p = tmp_path / "doc.md"
     p.write_text("# Topic\n\nThe cat sat on the mat.\n", encoding="utf-8")
     corpus.ingest(p)
+    corpus.index()
     return corpus.search("cat sat", top_k=1)[0]["id"]
 
 

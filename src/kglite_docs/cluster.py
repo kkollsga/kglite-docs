@@ -108,7 +108,7 @@ def _embedding_cluster(
     """Pull chunk embeddings, run sklearn-style clustering in numpy, return rows."""
     import numpy as np
 
-    embs = store.g.embeddings(CHUNK, "text")  # type: ignore[attr-defined]
+    embs = store.g.embeddings(CHUNK, "text")
     if not embs:
         return []
     ids = list(embs.keys())

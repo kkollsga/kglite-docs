@@ -127,7 +127,7 @@ def cluster_to_md(
 
 def md_to_docx(md: str, out_path: str | Path) -> Path:
     """Render markdown to .docx using python-docx."""
-    from docx import Document  # type: ignore
+    from docx import Document
 
     doc = Document()
     for line in md.splitlines():

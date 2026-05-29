@@ -19,6 +19,7 @@ def _ingest(corpus: Corpus, tmp_path: Path) -> str:
         encoding="utf-8",
     )
     corpus.ingest(p)
+    corpus.index()
     return corpus.search("Dense passage retrieval", top_k=1)[0]["id"]
 
 

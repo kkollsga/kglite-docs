@@ -15,6 +15,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from kglite_docs import Corpus
 
@@ -197,6 +198,7 @@ def _cmd_ocr_status(args: argparse.Namespace) -> int:
 
 def _cmd_show(args: argparse.Namespace) -> int:
     corpus = Corpus.open(args.db)
+    d: Any
     if args.kind == "doc":
         d = corpus.get_document(args.id)
     elif args.kind == "chunk":

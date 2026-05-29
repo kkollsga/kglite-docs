@@ -7,6 +7,179 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-05-29
+
+### Added — evidence-study workflow (new `study` MCP noun)
+
+- **First-class evidence analysis.** A validated multi-agent trial showed
+  the prior workaround (stance smuggled into a tag *name*, weight overloaded
+  onto tag *confidence*, rationale in a disconnected `Summary`, a 3-query
+  stitch to rank) was the wrong shape. The new `study` noun owns the flow:
+  `define` a question → `assess` each chunk (`supports`/`against`/`neutral`
+  + 0–1 probative `weight` + `rationale`) → `ledger` (weight-ranked evidence
+  + support/against tallies; `stance=` filters to one side) → `verify`
+  (second agent: `verified`/`disputed`/`duplicate`) → `conclude` (a verifiable
+  summary on the study) → `list`/`get`/`reopen`/`delete`. `next` is a
+  resumable work-list of un-assessed chunks.
+- **Reified `Assessment` nodes** (`(Chunk)-[:ASSESSED_AS]->(Assessment)-[:OF_STUDY]->(Study)`,
+  `(Agent)-[:AUTHORED]->`): multiple agents can co-assess the same chunk; each
+  assessment is independently verifiable. Append-only / latest-wins (no
+  mutated-property hazard); stance/status/verification tracked as secondary
+  labels for index-speed filtering.
+- **No embeddings required.** `assess` never touches the model (rationale is a
+  plain property) — a whole study runs on an un-`index`ed corpus; agents
+  iterate chunks via `next`. Recording is ~10ms/chunk.
+- **Punchcard claiming on `next`.** `study("next", study_id, agent_id=…)`
+  atomically *checks out* the returned chunks (a `Checkout` node) and excludes
+  chunks already claimed by others, so a fan-out of analysts gets disjoint
+  batches and never overlaps. Claims auto-expire after 30 min and assessing
+  releases implicitly; omitting `agent_id` is a read-only preview. (A blind
+  two-agent trial had both analysts grab the same chunks; this closes that.)
+- **Read-context + recorded spans for incoherent chunks.** `chunk("get",
+  window=N)` returns the N chunks before/after in reading order *with text*
+  (via the `NEXT_CHUNK` spine), so an agent can interpret a chunk that doesn't
+  stand on its own. When the neighbours were actually needed, `study("assess",
+  context_chunk_ids=[…])` records them as `USED_CONTEXT` edges: the `ledger`
+  row surfaces the span (retrieval pulls the full relevant neighbours), and
+  those context chunks are **excluded from the work-list** so no agent
+  re-judges the same meaning.
+- MCP surface: 12 → **13 noun tools** (revisit merges later). Server
+  `_INSTRUCTIONS` gains an evidence-study happy-path; the `study` tool
+  docstring is a copy-pasteable loop so agents need no prompt-side convention.
+
+### Fixed — tag ranking exposes confidence
+
+- `tag("list")` now returns each application's `confidence` (it was dropped,
+  so the typed surface couldn't rank by it); `tag("chunks")` ranks by
+  strongest confidence then tagger count. `add_summary(embed=False)` makes
+  summary embedding opt-out (study conclusions default to no-embed).
+
+### Changed — embedding is now optional and explicit
+
+- **Ingest no longer embeds by default.** `document("ingest")` (and
+  `Corpus.ingest`) now parse, chunk, and store *without* touching the
+  embedding model — fast, no model load, no per-call-timeout risk. Real
+  PDFs that took 48–90s to ingest now return in ~6s. Ready chunks are
+  tracked as unembedded via the `c.embedded` property.
+- **New `document("index")` action** (`Corpus.index`) computes embeddings
+  for ready-but-unembedded chunks, in length-sorted batches to cut bge-m3
+  padding waste. Run it after ingest to enable `search`; skip it entirely
+  for non-semantic workflows (browse / cypher / tag / review / ocr /
+  export / translate need no embeddings). One-shot still available via
+  `document("ingest", ..., embed=True)`.
+- **`index` is bounded per call and loop-friendly.** A blind-agent test
+  showed that while ingest was now fast, indexing a whole multi-document
+  corpus in a single call still ran ~100s (and a 144-chunk corpus ran long
+  enough that the agent abandoned it) — the per-call-timeout risk had just
+  moved from ingest to index. `index` now does at most ~30s of work
+  (wall-clock budget, or `max_chunks`) per call, commits the partial
+  progress, and returns `pending > 0` with a `hint` to call again. The
+  agent loops `while pending: index()`; no single call exceeds the budget
+  (+ at most one batch). `max_seconds=None` drains everything in one pass
+  (used by CLI `--ingest` preload, where there's no timeout).
+- Ingest results now carry `embedded` count + a `hint` pointing at `index`
+  when chunks are unembedded.
+
+### Fixed
+
+- **Tool-driven ingest now persists to disk.** The long-lived MCP server
+  previously only saved when launched with `--ingest`; interactive
+  `document("ingest")` mutations were lost on restart. Now saved at the
+  tool boundary (ingest/index) plus a save-on-shutdown backstop for all
+  mutations.
+- Embedding lifecycle is tracked by the `c.embedded` property (with an
+  additive `:Embedded` label for browsing) rather than a removable
+  `:Unembedded` label. This was originally a workaround for a kglite
+  multi-label read bug — `MATCH (n:Label)` over-reported after
+  `remove_label` — which we reported and kglite fixed in **0.10.6** (root
+  cause was read-side fast-paths consulting only the primary-type index,
+  not a stale index as we first guessed; no data corruption, no `.kgl`
+  migration). The property-based design is version-independent so we kept
+  it; removable labels / `swap_label` now work correctly regardless.
+
+### Dependencies
+
+- Bumped `kglite>=0.10.9` (multi-label read fix from 0.10.6; FxHash query
+  perf from 0.10.7: `multi_where −38%`, `group_by −23%`, `where_scan −21%;
+  four Cypher-dialect fixes in 0.10.8 we reported building `study` —
+  `labels()`/properties on a `collect()[0]` node, parameters inside
+  `EXISTS {}`, node-expression inline-map values, and `DETACH DELETE`
+  skipping NULL vars; and the 0.10.9 self-healing id-index that makes
+  `MATCH (n {id: X})` / MERGE lookups O(1) — a free win for the study
+  workflow's many id lookups) and `mcp-methods>=0.3.40` (fixes `graph_overview` forwarding the dropped
+  `describe(limit=)` kwarg, and `cypher_query` failing `-> str` validation
+  on kglite's `ResultView`). Both escape-hatch tools now work on kglite
+  0.10.x. The latent over-reporting in the other `swap_label` lifecycles
+  (summary verification, OCR, review kanban, translations) is fixed by the
+  0.10.6 upgrade.
+
+### Performance
+
+- Background bge-m3 warm-load at server boot (off-thread), `HF_HUB_OFFLINE`
+  when weights are cached, and `cooldown=0` for the server — the model
+  load (~8s) and HF-hub network checks no longer land on the first
+  ingest/search call. `--no-warmup` skips it for non-embedding
+  deployments.
+
+## [0.0.5] — 2026-05-28
+
+### Changed (MCP surface — agent-facing)
+
+- **Collapsed 45 standalone MCP tools into 12 CLI-style noun dispatchers.**
+  Each dispatcher takes an action verb as the first positional arg:
+
+  ```
+  document(action, ...)   ingest | list | get | export | compare
+  chunk(action, ...)      get | similar
+  search(query, mode=…)   hits (default) | compose
+  summary(action, ...)    add | verify | list | ground | claim | consensus
+  tag(action, ...)        add | remove | list | chunks
+  agent(action, ...)      upsert | get | list | activity
+  review(action, ...)     enqueue | enqueue_chunks | claim_next | claim |
+                          unclaim | complete | list | get | stats
+  ocr(action, ...)        status | pending | submit
+  cluster(action, ...)    run | get | list | export
+  translate(action, ...)  add | list | assemble
+  ```
+
+  Plus `cypher_query` and `graph_overview` from mcp-methods. An agent
+  reads the methodology skill and copies verb-noun pairs straight into
+  tool calls (`document("ingest", path=...)`, `summary("verify", id=...,
+  verdict=...)`) — patterned like `git branch list`, not 45 standalone
+  functions to scan.
+
+  The Python `Corpus` API is **unchanged** — the dispatch only lives in
+  the MCP shim.
+
+### Added (agent onboarding)
+
+- **`Corpus.compare_documents(doc_a, doc_b, queries=[...])`** —
+  side-by-side cross-document retrieval. For each query, returns the
+  top hits from each document plus a budgeted merged context bundle.
+  Exposed as `document("compare", ...)` over MCP.
+- **First-contact `instructions=`** on the FastMCP server.
+  Connecting agents receive a ~250-word orientation on `initialize`
+  covering the CLI surface and the canonical happy path.
+- **4 methodology skill files** registered as MCP prompts via
+  mcp-methods' `SkillRegistry`:
+  - `/00-start-here` — overview + the canonical happy path
+  - `/analyze-documents` — canonical pipeline for "given N docs + a task"
+  - `/compare-documents` — the two-doc comparison idiom
+  - `/cross-checked-review` — write/verify/ground flow for trustworthy
+    summaries
+
+  Skills are loaded by the agent on demand (`/<skill-name>`) — not
+  preloaded into context.
+
+### Removed (redundant — covered elsewhere)
+
+- `register_agent` → `agent("upsert", ...)`
+- `link_verification` → niche; use `cypher_query`
+- `record_view` → implicit when passing `agent_id` to `search` / `chunk("get", ...)`
+- `untag_chunk` → `tag("remove", ...)`
+- `ingest_dir`, `ingest_text` → `document("ingest", directory=...)` /
+  `document("ingest", text=..., title=...)`
+
 ## [0.0.4] — 2026-05-28
 
 ### Changed (internal data model — public API unchanged)

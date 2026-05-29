@@ -21,6 +21,10 @@ VIEW: Final = "View"
 NOTE: Final = "Note"
 REVIEW_TICKET: Final = "ReviewTicket"
 REVIEW_EVENT: Final = "ReviewEvent"
+STUDY: Final = "Study"
+ASSESSMENT: Final = "Assessment"
+VERIFICATION_EVENT: Final = "VerificationEvent"
+CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
 # Edge types
 HAS_PAGE: Final = "HAS_PAGE"
@@ -39,6 +43,16 @@ TARGETS: Final = "TARGETS"
 CLAIMED: Final = "CLAIMED"
 REVIEWED: Final = "REVIEWED"
 HAS_REVIEW_EVENT: Final = "HAS_REVIEW_EVENT"
+HAS_VERIFICATION: Final = "HAS_VERIFICATION"  # Summary/Assessment → VerificationEvent
+ASSESSED_AS: Final = "ASSESSED_AS"            # Chunk → Assessment (mirrors TAGGED_AS)
+OF_STUDY: Final = "OF_STUDY"                  # Assessment → Study (mirrors OF_TAG)
+CHECKED_OUT: Final = "CHECKED_OUT"            # Checkout → Chunk (the punched cards)
+HOLDS: Final = "HOLDS"                        # Agent → Checkout
+USED_CONTEXT: Final = "USED_CONTEXT"          # Assessment → Chunk (neighbors read to interpret the focal chunk)
+
+# Punchcard lease: a checkout older than this is treated as abandoned and
+# its chunks become claimable again (and are GC'd on the next claim).
+CLAIM_TTL_SECONDS: Final = 1800  # 30 min
 
 # Review ticket states (event-sourced via ReviewEvent)
 REVIEW_NEW: Final = "new"
@@ -77,6 +91,32 @@ CHUNK_STATUS_READY: Final = "ready"
 CHUNK_STATUS_NEEDS_OCR: Final = "needs_ocr"
 CHUNK_STATUS_EMPTY: Final = "empty"
 
+# Chunk embedding lifecycle (independent of status). Embedding is an
+# optional, explicit phase: `ingest` writes ready chunks as pending;
+# `index` flips them to done. Lets non-semantic workflows skip the model.
+CHUNK_EMBED_PENDING: Final = "pending"
+CHUNK_EMBED_DONE: Final = "done"
+
+# Evidence-study: stance of an Assessment toward a Study's question
+STANCE_SUPPORTS: Final = "supports"
+STANCE_AGAINST: Final = "against"
+STANCE_NEUTRAL: Final = "neutral"
+VALID_STANCES: Final = frozenset({STANCE_SUPPORTS, STANCE_AGAINST, STANCE_NEUTRAL})
+
+# Study lifecycle
+STUDY_OPEN: Final = "open"
+STUDY_CLOSED: Final = "closed"
+
+# Assessment verification verdicts (verified/disputed mirror summaries;
+# duplicate is the "these are the same" outcome from second-agent review)
+ASSESSMENT_UNVERIFIED: Final = "unverified"
+ASSESSMENT_VERIFIED: Final = "verified"
+ASSESSMENT_DISPUTED: Final = "disputed"
+ASSESSMENT_DUPLICATE: Final = "duplicate"
+VALID_ASSESSMENT_VERDICTS: Final = frozenset(
+    {ASSESSMENT_VERIFIED, ASSESSMENT_DISPUTED, ASSESSMENT_DUPLICATE}
+)
+
 # Summary depths
 DEPTH_CHUNK: Final = "chunk"
 DEPTH_SECTION: Final = "section"
@@ -113,6 +153,24 @@ LABEL_SERVICE: Final = "Service"
 LABEL_READY: Final = "Ready"
 LABEL_NEEDS_OCR: Final = "NeedsOcr"
 LABEL_EMPTY: Final = "Empty"
+
+# Chunk embedding lifecycle → labels. `MATCH (c:Chunk:Unembedded)` is the
+# work-list `index` drains; `:Embedded` marks searchable chunks.
+LABEL_EMBEDDED: Final = "Embedded"
+LABEL_UNEMBEDDED: Final = "Unembedded"
+
+# Assessment stance → labels (`MATCH (a:Assessment:Supports)`)
+LABEL_SUPPORTS: Final = "Supports"
+LABEL_AGAINST: Final = "Against"
+LABEL_NEUTRAL: Final = "Neutral"
+
+# Study lifecycle → labels
+LABEL_OPEN: Final = "Open"
+LABEL_CLOSED: Final = "Closed"
+
+# Assessment verification → labels (Unverified/Verified/Disputed reuse the
+# summary label *names*; Duplicate is study-specific)
+LABEL_DUPLICATE: Final = "Duplicate"
 
 # Summary verification → labels (also used for ReviewTicket overlap)
 LABEL_UNVERIFIED: Final = "Unverified"
@@ -153,6 +211,29 @@ _CHUNK_STATUS_LABELS: Final[dict[str, str]] = {
     CHUNK_STATUS_READY: LABEL_READY,
     CHUNK_STATUS_NEEDS_OCR: LABEL_NEEDS_OCR,
     CHUNK_STATUS_EMPTY: LABEL_EMPTY,
+}
+
+_CHUNK_EMBED_LABELS: Final[dict[str, str]] = {
+    CHUNK_EMBED_PENDING: LABEL_UNEMBEDDED,
+    CHUNK_EMBED_DONE: LABEL_EMBEDDED,
+}
+
+_STUDY_STANCE_LABELS: Final[dict[str, str]] = {
+    STANCE_SUPPORTS: LABEL_SUPPORTS,
+    STANCE_AGAINST: LABEL_AGAINST,
+    STANCE_NEUTRAL: LABEL_NEUTRAL,
+}
+
+_STUDY_STATUS_LABELS: Final[dict[str, str]] = {
+    STUDY_OPEN: LABEL_OPEN,
+    STUDY_CLOSED: LABEL_CLOSED,
+}
+
+_ASSESSMENT_STATUS_LABELS: Final[dict[str, str]] = {
+    ASSESSMENT_UNVERIFIED: LABEL_UNVERIFIED,
+    ASSESSMENT_VERIFIED: LABEL_VERIFIED,
+    ASSESSMENT_DISPUTED: LABEL_DISPUTED,
+    ASSESSMENT_DUPLICATE: LABEL_DUPLICATE,
 }
 
 _SUMMARY_STATUS_LABELS: Final[dict[str, str]] = {
@@ -199,10 +280,14 @@ def _pascal_case(value: str) -> str:
 _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "agent.kind": _AGENT_KIND_LABELS,
     "chunk.status": _CHUNK_STATUS_LABELS,
+    "chunk.embedding": _CHUNK_EMBED_LABELS,
     "summary.verification_status": _SUMMARY_STATUS_LABELS,
     "review.status": _REVIEW_STATUS_LABELS,
     "translation.status": _TRANSLATION_STATUS_LABELS,
     "tag.kind": _TAG_KIND_LABELS,
+    "study.stance": _STUDY_STANCE_LABELS,
+    "study.status": _STUDY_STATUS_LABELS,
+    "assessment.verification_status": _ASSESSMENT_STATUS_LABELS,
 }
 
 

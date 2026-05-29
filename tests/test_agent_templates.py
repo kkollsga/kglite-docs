@@ -11,6 +11,7 @@ def _ingest(corpus: Corpus, tmp_path: Path) -> str:
     p = tmp_path / "d.md"
     p.write_text("# T\n\nFirst paragraph.\n\n# U\n\nSecond.\n", encoding="utf-8")
     corpus.ingest(p)
+    corpus.index()
     return corpus.search("paragraph", top_k=1)[0]["id"]
 
 

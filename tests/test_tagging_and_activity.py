@@ -11,6 +11,7 @@ def _ingest_md(corpus: Corpus, tmp_path: Path) -> str:
     p = tmp_path / "d.md"
     p.write_text("# T\n\nBody.\n", encoding="utf-8")
     corpus.ingest(p)
+    corpus.index()
     return corpus.search("Body", top_k=1)[0]["id"]
 
 

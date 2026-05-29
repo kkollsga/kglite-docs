@@ -23,6 +23,7 @@ def _ingest_md(corpus: Corpus, tmp_path: Path) -> str:
         encoding="utf-8",
     )
     corpus.ingest(p)
+    corpus.index()
     return corpus.search("First paragraph", top_k=1)[0]["id"]
 
 
@@ -97,6 +98,7 @@ def test_labels_survive_save_and_reload(corpus: Corpus, tmp_path: Path) -> None:
     p = tmp_path / "d.md"
     p.write_text("# Topic\n\nbody\n", encoding="utf-8")
     c.ingest(p)
+    c.index()
     cid = c.search("body", top_k=1)[0]["id"]
     sid = c.add_summary(cid, "X", agent_id="agent-x")
     c.save()
@@ -124,3 +126,26 @@ def test_cross_type_label_predicate(corpus: Corpus, tmp_path: Path) -> None:
         "MATCH (n:Reviewed) RETURN labels(n) AS labels, n.id AS id"
     ).to_list()
     assert any("ReviewTicket" in r["labels"] for r in out)
+
+
+def test_study_labels_survive_save_and_reload(corpus: Corpus, tmp_path: Path) -> None:
+    """Stance / study-status / assessment-verification labels round-trip
+    through save+reload and are queryable as predicates."""
+    db = tmp_path / "study.kgl"
+    c = Corpus.create(db, embedder=corpus.embedder)
+    p = tmp_path / "d.md"
+    p.write_text("# A\n\nbody one\n\n# B\n\nbody two\n", encoding="utf-8")
+    c.ingest(p)
+    cid = c.cypher("MATCH (ch:Chunk:Ready) RETURN ch.id AS id LIMIT 1").to_list()[0]["id"]
+    sid = c.define_study("Q", created_by="lead")
+    a = c.assess(sid, cid, stance="supports", weight=0.9, agent_id="a1")
+    c.verify_assessment(a["assessment_id"], verdict="verified", verifier_agent_id="checker")
+    c.save()
+
+    g = kglite.load(str(db))
+    assert g.cypher("MATCH (s:Study:Open) RETURN s.id AS id").to_list()[0]["id"] == sid
+    assert g.cypher("MATCH (a:Assessment:Supports) RETURN count(a) AS n").to_list()[0]["n"] == 1
+    assert g.cypher("MATCH (a:Assessment:Verified) RETURN count(a) AS n").to_list()[0]["n"] == 1
+    # cross-type: Verified now spans Summary and Assessment
+    verified = g.cypher("MATCH (n:Verified) RETURN labels(n) AS labels").to_list()
+    assert any("Assessment" in r["labels"] for r in verified)

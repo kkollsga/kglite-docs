@@ -86,7 +86,7 @@ def tag_chunk(
                 "tagging_id": existing[0]["id"]}
 
     tagging_id = str(uuid.uuid4())
-    row = {
+    row: dict[str, Any] = {
         "id": tagging_id,
         "title": f"{tag_name} by {agent_id}",
         "chunk_id": chunk_id,
@@ -149,6 +149,7 @@ def list_tags(
     parts.append(
         "RETURN t.id AS tag_id, t.name AS name, t.kind AS kind, "
         "tg.by_agent AS by_agent, tg.created_at AS at, tg.id AS tagging_id, "
+        "tg.confidence AS confidence, "
         "c.id AS chunk_id, c.doc_id AS doc_id"
     )
     return _df_dicts(store.cypher(" ".join(parts), params=params))
@@ -156,11 +157,14 @@ def list_tags(
 
 def chunks_by_tag(store: Store, *, tag_name: str, limit: int = 100) -> list[dict[str, Any]]:
     tag_id = _slug(tag_name)
+    # Rank by the strongest confidence on the tag (so a "supports"/weight tag
+    # surfaces the most-confident chunks first), then by tagger count. Both
+    # `confidence` and `taggers` are returned so callers can re-rank.
     return _df_dicts(store.cypher(
         "MATCH (c:Chunk)-[:TAGGED_AS]->(tg:Tagging)-[:OF_TAG]->(t:Tag {id: $tid}) "
-        "WITH c, count(tg) AS taggers "
+        "WITH c, count(tg) AS taggers, max(tg.confidence) AS confidence "
         "RETURN c.id AS id, c.doc_id AS doc_id, c.page_number AS page, "
-        "c.title AS title, c.text AS text, taggers "
-        f"ORDER BY taggers DESC LIMIT {int(limit)}",
+        "c.title AS title, c.text AS text, taggers, confidence "
+        f"ORDER BY confidence DESC, taggers DESC LIMIT {int(limit)}",
         params={"tid": tag_id},
     ))

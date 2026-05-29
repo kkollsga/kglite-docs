@@ -89,8 +89,8 @@ def check_grounding(
         }
 
     # Embed sentences + source texts (or pull pre-computed chunk embeddings)
-    pre_vecs = store.g.embeddings(CHUNK, "text")  # type: ignore[attr-defined]
-    src_vecs = []
+    pre_vecs = store.g.embeddings(CHUNK, "text")
+    src_vecs: list[list[float] | None] = []
     missing_idx = []
     for i, cid in enumerate(src_ids):
         if cid in pre_vecs:
@@ -158,7 +158,7 @@ def verify_claim(
         ))
         if not rows:
             return {"claim": claim_text, "support": []}
-        pre_vecs = store.g.embeddings(CHUNK, "text")  # type: ignore[attr-defined]
+        pre_vecs = store.g.embeddings(CHUNK, "text")
         claim_vec = embedder.embed([claim_text])[0]
         scored: list[dict[str, Any]] = []
         for r in rows:
