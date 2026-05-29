@@ -60,6 +60,15 @@ breaking changes (called out below).
   now flagged `needs_ocr`. Pages also carry an `image_block_count` (for the
   upcoming coverage report). Honest-coverage: unreadable pages are observable.
 
+### Documentation
+- **Confidentiality posture (FEAT-13):** new
+  [Confidentiality](https://kglite-docs.readthedocs.io/en/latest/privacy/) page
+  (+ README section) stating plainly that all parsing, embedding, and
+  analysis run locally against a local `.kgl` — the only network call is a
+  one-time bge-m3 weight download from HuggingFace; no document content is ever
+  transmitted. Covers the benign "unauthenticated requests to HF Hub" message,
+  automatic `HF_HUB_OFFLINE` once cached, and a fully air-gapped setup recipe.
+
 ## [0.0.6] — 2026-05-29
 
 ### Added — evidence-study workflow (new `study` MCP noun)

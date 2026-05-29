@@ -22,6 +22,7 @@ Most "RAG libraries" hand the agent `search(query) → list[chunk]` and stop. kg
 - 🛡️ **Grounding checks** — score how well an agent's summary aligns with its sources. Catch hallucinations before they ship.
 - 🌍 **Translations** — per-chunk, multi-translator, with author/reviewer provenance.
 - 🖼️ **Agent-driven OCR** — scanned pages handed back as rendered PNGs; agent transcribes and the graph absorbs the result.
+- 🔒 **Local & private** — parsing, embedding, and analysis all run on your machine against a local `.kgl` file. The only network call is a one-time bge-m3 model download; your documents never leave the host. See [Confidentiality](https://kglite-docs.readthedocs.io/en/latest/privacy/).
 
 ## Install
 
@@ -80,6 +81,7 @@ The agent now sees ~30 typed tools (`search`, `compose_context`, `add_summary`, 
 - [Architecture](https://kglite-docs.readthedocs.io/en/latest/architecture/) — graph model, design rationale, the 30+ typed MCP tools
 - [API reference](https://kglite-docs.readthedocs.io/en/latest/api/corpus/) — every method, every argument, IDE-friendly type stubs
 - [Troubleshooting](https://kglite-docs.readthedocs.io/en/latest/troubleshooting/) — common failure modes
+- [Confidentiality](https://kglite-docs.readthedocs.io/en/latest/privacy/) — everything runs local; what the one network call is (and isn't)
 - [Changelog](https://kglite-docs.readthedocs.io/en/latest/changelog/)
 
 ## License
