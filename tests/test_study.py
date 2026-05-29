@@ -283,3 +283,52 @@ def test_validation(corpus: Corpus, tmp_path: Path) -> None:
         corpus.assess(sid, ch[0], stance="supports", weight=1.5, agent_id="a1")
     with pytest.raises(InvalidEnumError):
         corpus.define_study("", created_by="lead")
+
+
+def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
+    """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    for i in range(6):
+        corpus.assess(sid, ch[i], stance="supports", weight=0.5 + i / 100, agent_id="a1")
+
+    clipped = corpus.study_ledger(sid, limit=3)
+    assert clipped["returned"] == 3
+    assert len(clipped["rows"]) == 3
+    assert clipped["total"] == 6          # truncation is observable
+    assert clipped["total"] > clipped["returned"]
+
+    full = corpus.study_ledger(sid, limit=200)
+    assert full["total"] == full["returned"] == 6   # nothing hidden
+
+
+def _doc_id_of(corpus: Corpus, chunk_id: str) -> str:
+    return corpus.cypher(
+        "MATCH (c:Chunk {id: $id}) RETURN c.doc_id AS d", params={"id": chunk_id}
+    ).to_list()[0]["d"]
+
+
+def test_ledger_doc_id_scope(corpus: Corpus, tmp_path: Path) -> None:
+    """BUG-3: doc_id scopes the ledger (rows + total) to one document."""
+    ch_a = _ingest_chunks(corpus, tmp_path)
+    doc_a = _doc_id_of(corpus, ch_a[0])
+
+    # A second, distinct document.
+    p2 = tmp_path / "doc2.md"
+    p2.write_text("# Doc2\n\n" + "\n\n".join(f"Other paragraph {i}." for i in range(250)),
+                  encoding="utf-8")
+    corpus.ingest(p2)
+    ch_b = [r["id"] for r in corpus.cypher(
+        "MATCH (c:Chunk:Ready) WHERE c.doc_id <> $da RETURN c.id AS id ORDER BY c.chunk_index",
+        params={"da": doc_a},
+    ).to_list()]
+
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch_a[0], stance="supports", weight=0.9, agent_id="a1")
+    corpus.assess(sid, ch_a[1], stance="against", weight=0.7, agent_id="a1")
+    corpus.assess(sid, ch_b[0], stance="supports", weight=0.8, agent_id="a1")
+
+    scoped = corpus.study_ledger(sid, doc_id=doc_a)
+    assert scoped["total"] == scoped["returned"] == 2
+    assert all(r["doc_id"] == doc_a for r in scoped["rows"])
+    assert corpus.study_ledger(sid)["total"] == 3   # unscoped sees both docs

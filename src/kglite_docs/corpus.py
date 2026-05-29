@@ -1107,13 +1107,16 @@ class Corpus:
     def study_ledger(
         self, study_id: str, *,
         stance: Stance | None = None, min_weight: float | None = None,
-        verified_only: bool = False, limit: int = 200,
+        verified_only: bool = False, doc_id: str | None = None, limit: int = 200,
     ) -> Ledger:
         """Weight-ranked evidence ledger for a study + support/against tallies.
-        Pass `stance="supports"`/`"against"` to retrieve just that side."""
+        Pass `stance="supports"`/`"against"` to retrieve just that side, or
+        `doc_id=` to scope to one document. The result reports `total` (matches
+        before `limit`) and `returned`; `total > returned` means it was clipped."""
         return cast(Ledger, study_mod.ledger(
             self._store, study_id=study_id, stance=stance,
-            min_weight=min_weight, verified_only=verified_only, limit=limit,
+            min_weight=min_weight, verified_only=verified_only,
+            doc_id=doc_id, limit=limit,
         ))
 
     def verify_assessment(

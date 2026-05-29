@@ -398,13 +398,17 @@ def ledger(
     stance: str | None = None,
     min_weight: float | None = None,
     verified_only: bool = False,
+    doc_id: str | None = None,
     limit: int = 200,
 ) -> dict[str, Any]:
     """Weight-ranked evidence ledger for a study — the orchestrator's one call.
 
     Dedups to the latest assessment per (chunk, agent), ranks by weight DESC.
     `stance` ("supports"/"against"/"neutral") and `verified_only` filter via
-    label predicates. Returns rows + support/against tallies.
+    label predicates; `doc_id` scopes to one document. Returns `rows` plus
+    support/against `tallies`, and — for honest coverage — `total` (matches
+    before the `limit`) and `returned` (rows handed back); `total > returned`
+    means the ledger was truncated.
     """
     meta = _df_dicts(store.cypher(
         "MATCH (s:Study {id: $id}) RETURN s.question AS question, s.status AS status",
@@ -422,18 +426,33 @@ def ledger(
         label_parts += ":" + label_for("assessment.verification_status", "verified")
 
     params: dict[str, Any] = {"id": study_id, "lim": int(limit)}
-    where = ""
+    # doc_id filters the chunk *before* the latest-per-(chunk,agent) grouping;
+    # min_weight filters the surviving `latest` *after* it.
+    pre_where = ""
+    if doc_id:
+        pre_where = "WHERE c.doc_id = $doc_id"
+        params["doc_id"] = doc_id
+    post_where = ""
     if min_weight is not None:
-        where = "WHERE latest.weight >= $minw"
+        post_where = "WHERE latest.weight >= $minw"
         params["minw"] = float(min_weight)
 
-    # Latest assessment per (chunk, agent): order by recency, take head.
-    df = store.cypher(
+    # Shared MATCH + dedup prefix — reused for the row query and the total count
+    # so `total` counts exactly the latest-per-(chunk,agent) groups the rows
+    # would contain without the LIMIT.
+    base = (
         f"MATCH (c:Chunk)-[:ASSESSED_AS]->(a:Assessment{label_parts})-[:OF_STUDY]->(:Study {{id: $id}}) "
+        f"{pre_where} "
         "WITH c, a.by_agent AS ag, a ORDER BY a.created_at DESC "
         "WITH c, ag, collect(a)[0] AS latest "
-        f"{where} "
-        "RETURN latest.id AS assessment_id, c.id AS chunk_id, c.doc_id AS doc_id, "
+        f"{post_where} "
+    )
+
+    total_rows = _df_dicts(store.cypher(base + "RETURN count(latest) AS n", params=params))
+    total = int(total_rows[0]["n"]) if total_rows else 0
+
+    df = store.cypher(
+        base + "RETURN latest.id AS assessment_id, c.id AS chunk_id, c.doc_id AS doc_id, "
         "c.page_number AS page, latest.stance AS stance, latest.weight AS weight, "
         "latest.rationale AS rationale, latest.by_agent AS by_agent, "
         "labels(latest) AS labels, c.text AS text "
@@ -461,6 +480,8 @@ def ledger(
         "question": meta[0]["question"],
         "status": meta[0]["status"],
         "rows": rows,
+        "total": total,
+        "returned": len(rows),
         "tallies": _tallies(store, study_id),
     }
 

@@ -839,7 +839,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `agent_id` and they'll get disjoint batches.
         - **`ledger`** — weight-ranked evidence + support/against tallies.
           Requires `study_id`; optional `stance` (→ just the supporting or
-          contradicting side), `min_weight`, `verified_only`, `limit`.
+          contradicting side), `min_weight`, `verified_only`, `doc_id` (scope to
+          one document), `limit`. Reports `total`/`returned` so truncation is
+          visible (`total > returned` ⇒ raise `limit` to see the rest).
         - **`verify`** — a second agent checks an assessment. Requires
           `assessment_id`, `verdict` (`verified`/`disputed`/`duplicate` —
           `duplicate` = "same as another"), `verifier_agent_id`. Server
@@ -900,7 +902,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return corpus.study_ledger(
                 _require(study_id, "study_id", action, "study"),
                 stance=stance, min_weight=min_weight,
-                verified_only=verified_only, limit=limit,
+                verified_only=verified_only, doc_id=doc_id, limit=limit,
             )
         if action == "verify":
             r = corpus.verify_assessment(

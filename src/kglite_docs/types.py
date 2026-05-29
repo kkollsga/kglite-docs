@@ -440,6 +440,8 @@ class Ledger(TypedDict, total=False):
     question: str
     status: StudyStatus
     rows: list[AssessmentRow]
+    total: int
+    returned: int
     tallies: dict[str, Any]
 
 

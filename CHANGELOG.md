@@ -21,6 +21,13 @@ breaking changes (called out below).
 - **`compose_context()` now reports `searched_fraction` (FEAT-3):** the share of
   the corpus actually searchable (embedded chunks ÷ ready chunks). `1.0` = full
   coverage; `< 1.0` means part of the corpus was invisible to the query.
+- **`study_ledger()` reports `total` + `returned` and accepts `doc_id` scoping
+  (BUG-3).** The ledger caps at `limit` (default 200) but used to give no hint
+  when it clipped the evidence — an orchestrator could draw a conclusion from a
+  silently-truncated record. It now returns `total` (matches before the limit)
+  and `returned` (rows handed back); `total > returned` means raise `limit` to
+  see the rest. `doc_id=` scopes the whole ledger (rows + counts) to one
+  document, mirroring `study("next", doc_id=…)`.
 
 ### Fixed
 - **Retrieval over an unindexed corpus is now a loud signal, not a silent `[]`
