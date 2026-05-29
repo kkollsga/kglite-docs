@@ -186,7 +186,7 @@ Biggest quality lever; unblocks section-scoped studies + pinpoint cites.
 
 ---
 
-## Release 0.1.0 — "Scale & polish"  (FEAT-11/12/14 + surface review)
+## Release 0.0.10 — "Scale & polish"  (FEAT-11/12/14 + surface review)
 
 ### Phase 10.1 — Concurrency: docs + `assess_many` + file-lock (FEAT-12) · M
 - Docs: a plain "single-writer; fan out read-only, funnel writes through one
@@ -214,7 +214,7 @@ Biggest quality lever; unblocks section-scoped studies + pinpoint cites.
 - Tests: cypher iteration; get_chunk access patterns.
 - Commit: `feat: ResultView/get_chunk ergonomics + surface review (FEAT-14)`
 
-**→ Release boundary: bump `0.0.9 → 0.1.0`, push (joint).**
+**→ Release boundary: bump `0.0.9 → 0.0.10`, push (joint).**
 
 ---
 

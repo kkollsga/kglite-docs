@@ -271,7 +271,7 @@ generally trustworthy.
 FEAT-9 (sections), FEAT-6 (pinpoint spans), FEAT-10 (structure-aware chunking).
 The biggest quality lever; unblocks section-scoped studies and pinpoint cites.
 
-### 0.1.0 — "Scale & polish"
+### 0.0.10 — "Scale & polish"
 FEAT-11 (summary-augmented chunking), FEAT-12 (concurrency + `assess_many` +
 file-lock), FEAT-14 (ergonomics). Plus the deferred review of whether the MCP
 surface can fold back toward 12 tools (e.g. relocating `summary`'s ephemeral
