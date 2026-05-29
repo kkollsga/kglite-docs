@@ -87,6 +87,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         - **`compare`** — side-by-side cross-doc retrieval. Requires `doc_a`,
           `doc_b`, `queries=[...]`. For each query, returns top hits from
           each doc plus a budgeted merged context bundle.
+        - **`status`** — one-call corpus snapshot: docs, pages, chunks,
+          embedded/unembedded, image_pages, pending_ocr, studies. Check first.
+        - **`coverage`** — honest extraction + embedding coverage per doc +
+          corpus, with a human `summary` (what's image-only / low-text /
+          unembedded). Optional `doc_id` to scope.
 
         Examples::
 
@@ -179,9 +184,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 max_tokens_per_query=max_tokens_per_query,
                 agent_id=agent_id,
             )
+        if action == "status":
+            return corpus.status()
+        if action == "coverage":
+            return corpus.coverage_report(doc_id=doc_id)
         raise ValueError(
             f"document(): unknown action {action!r}. "
-            "Valid: ingest, index, list, get, export, compare",
+            "Valid: ingest, index, list, get, export, compare, status, coverage",
         )
 
     # ─── chunk ────────────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ from typing import Protocol
 from kglite_docs.ingest.chunker import Chunk, chunk_page
 from kglite_docs.ingest.formats import detect_format, parse_document
 from kglite_docs.ingest.hashing import file_hash
-from kglite_docs.ingest.parser import PageContent
+from kglite_docs.ingest.parser import PageContent, _extractable_alnum
 from kglite_docs.schema import (
     CHUNK,
     CHUNK_STATUS_EMPTY,
@@ -163,6 +163,7 @@ def ingest_document(
             "width_pt": p.width_pt,
             "height_pt": p.height_pt,
             "image_block_count": p.image_block_count,
+            "extractable_alnum": _extractable_alnum(p.markdown),
         }
         for p in pages
     ]

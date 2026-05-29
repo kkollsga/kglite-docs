@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — honest coverage
+- **`document("coverage")` / `Corpus.coverage_report()` (FEAT-1):** per-document
+  + corpus extraction & embedding coverage — `image_pages`, `low_text_pages`,
+  `extractable_text_ratio`, `pending_ocr`, `unembedded`/`embedded`, and a
+  human-readable `summary` ("N image-only & L low-text pages need OCR; U chunks
+  unembedded — search blind until index()"). Coverage is reported as data, never
+  silently assumed.
+- **`document("status")` / `Corpus.status()` (FEAT-2):** one-call corpus snapshot
+  (docs, pages, chunks, embedded/unembedded, image_pages, pending_ocr, studies)
+  — the first thing to check. Pages now persist `extractable_alnum` at ingest;
+  pages ingested before this release count as low-text until re-ingested.
+
 ### Fixed
 - **Image-only PDF pages are now detected for OCR by text density, not "has any
   text at all" (BUG-1).** pymupdf4llm emits a `==> picture … intentionally

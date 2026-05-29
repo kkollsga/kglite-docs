@@ -67,6 +67,23 @@ def test_mcp_study_workflow_round_trip(corpus: Corpus, tmp_path: Path) -> None:
 
 
 @pytest.mark.mcp
+def test_mcp_document_status_and_coverage(corpus: Corpus, tmp_path: Path) -> None:
+    """document('status') + document('coverage') round-trip via the MCP app."""
+    p = tmp_path / "s.md"
+    p.write_text("# T\n\nsome body text here for coverage\n", encoding="utf-8")
+    corpus.ingest(p)
+
+    from kglite_docs.mcp_server.server import build_app
+    app = build_app(corpus, warm_embedder=False)
+
+    st = _call(app, "document", {"action": "status"})
+    assert st["docs"] == 1 and "unembedded" in st
+
+    cov = _call(app, "document", {"action": "coverage"})
+    assert "summary" in cov and isinstance(cov["documents"], list)
+
+
+@pytest.mark.mcp
 def test_mcp_tag_list_exposes_confidence(corpus: Corpus, tmp_path: Path) -> None:
     """tag('list') must surface confidence so the typed surface can rank."""
     p = tmp_path / "t.md"

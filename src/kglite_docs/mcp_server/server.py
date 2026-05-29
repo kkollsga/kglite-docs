@@ -31,7 +31,8 @@ THE INTERFACE IS A PSEUDO-CLI: noun tools, each takes an action
 verb as the first positional arg. Think `git branch list`, not 45
 standalone functions.
 
-  document(action, ...)   ingest | index | list | get | export | compare
+  document(action, ...)   ingest | index | list | get | export | compare |
+                          status | coverage
   chunk(action, ...)      get | similar
   search(query, mode=…)   hits (default) | compose
   study(action, ...)      define | assess | next | ledger | verify |
@@ -53,6 +54,10 @@ chunks, and stores fast (no model load). Run `document("index")` once
 afterwards to embed and unlock `search`. Workflows that only browse,
 run cypher, tag, review, OCR, export, or translate need no embeddings —
 skip `index` entirely. (One-shot: `document("ingest", ..., embed=True)`.)
+
+ORIENT FIRST: `document("status")` for a corpus snapshot, `document("coverage")`
+to see what's image-only/low-text (unanalyzed unless OCR'd) or unembedded —
+coverage is reported as data, never silently assumed.
 
 THE HAPPY PATH (semantic search/analysis):
 

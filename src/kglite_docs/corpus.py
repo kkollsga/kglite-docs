@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from kglite_docs import cluster as cluster_mod
 from kglite_docs import context as context_mod
+from kglite_docs import coverage as coverage_mod
 from kglite_docs import enrich as enrich_mod
 from kglite_docs import export as export_mod
 from kglite_docs import ocr as ocr_mod
@@ -72,6 +73,8 @@ from kglite_docs.types import (
     ComparisonQueryResult,
     ComparisonResult,
     ComposedContext,
+    CorpusStatus,
+    CoverageReport,
     DocumentDetail,
     DocumentRow,
     ExportFormat,
@@ -768,6 +771,20 @@ class Corpus:
             self._store, agent_id=agent_id, target_id=chunk_id,
             target_kind=CHUNK, context=context,
         )
+
+    # ─── coverage / status ────────────────────────────────────────────────
+
+    def status(self) -> CorpusStatus:
+        """One-call snapshot: docs, pages, chunks, embedded/unembedded,
+        image_pages, pending_ocr, studies. The first thing to check."""
+        return cast(CorpusStatus, coverage_mod.corpus_status(self._store))
+
+    def coverage_report(self, *, doc_id: str | None = None) -> CoverageReport:
+        """Honest extraction + embedding coverage per document + corpus-wide,
+        with a human-readable `summary` — what's image-only / low-text
+        (unanalyzed unless OCR'd) and how many chunks are unembedded (search
+        blind until `index()`). Pass `doc_id` to scope the per-doc rows."""
+        return cast(CoverageReport, coverage_mod.coverage_report(self._store, doc_id=doc_id))
 
     # ─── ocr ──────────────────────────────────────────────────────────────
 

@@ -193,6 +193,46 @@ class OcrStatus(TypedDict):
     documents: list[OcrStatusRow]
 
 
+class CoverageDocRow(TypedDict):
+    """Per-document row in `coverage_report()`."""
+
+    doc_id: str
+    title: str
+    format: str
+    pages: int
+    pending_ocr: int
+    image_pages: int
+    low_text_pages: int
+    extractable_text_ratio: float
+
+
+class CoverageReport(TypedDict):
+    """`Corpus.coverage_report()` return shape — honest extraction + embedding
+    coverage with a human-readable `summary`."""
+
+    documents: list[CoverageDocRow]
+    total_pages: int
+    image_pages: int
+    low_text_pages: int
+    pending_ocr: int
+    embedded: int
+    unembedded: int
+    summary: str
+
+
+class CorpusStatus(TypedDict):
+    """`Corpus.status()` — one-call snapshot of the corpus."""
+
+    docs: int
+    pages: int
+    chunks: int
+    embedded: int
+    unembedded: int
+    image_pages: int
+    pending_ocr: int
+    studies: int
+
+
 class ReviewTicketRow(TypedDict, total=False):
     """One row from `Corpus.list_review_queue()`. Add `target` and
     `events` by going through `Corpus.get_review_ticket()`."""
@@ -413,6 +453,7 @@ __all__ = [
     "GroundingReport", "GroundingSentence",
     "IngestSummary",
     "OcrStatus", "OcrStatusRow",
+    "CoverageReport", "CoverageDocRow", "CorpusStatus",
     "PendingOcrRow",
     "ReviewEvent", "ReviewStats", "ReviewStatus",
     "ReviewTicketDetail", "ReviewTicketRow", "ReviewVerdict",
