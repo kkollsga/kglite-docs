@@ -43,6 +43,13 @@ class GroundingError(KgliteDocsError):
     has no source chunks."""
 
 
+class NotIndexedError(KgliteDocsError):
+    """search / compose_context on a corpus that has ready chunks but
+    none embedded — call `Corpus.index()` (or `ingest(embed=True)`)
+    first. Raised instead of silently returning `[]`, which is
+    indistinguishable from a query that genuinely has no matches."""
+
+
 class InvalidEnumError(KgliteDocsError, ValueError):
     """A string value isn't one of the allowed enum members. Subclasses
     ValueError too, so old `except ValueError` paths still work."""
@@ -59,6 +66,7 @@ __all__ = [
     "InvalidEnumError",
     "KgliteDocsError",
     "MissingSourceError",
+    "NotIndexedError",
     "ReviewConflict",
     "SelfVerificationError",
     "UnsupportedFormatError",

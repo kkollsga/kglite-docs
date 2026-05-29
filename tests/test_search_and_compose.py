@@ -62,3 +62,5 @@ def test_compose_context_respects_budget(corpus: Corpus, tmp_path: Path) -> None
     bundle = corpus.compose_context("Paragraph", max_tokens=50)
     assert bundle["used_tokens"] <= 50
     assert all("text" in item for item in bundle["items"])
+    # Fully indexed → the whole corpus was searchable.
+    assert bundle["searched_fraction"] == 1.0

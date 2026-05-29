@@ -8,6 +8,7 @@ and agent users see the same vocabulary.
 from __future__ import annotations
 
 import contextlib
+import warnings
 from collections.abc import Iterable
 from pathlib import Path
 from types import TracebackType
@@ -42,12 +43,14 @@ from kglite_docs.activity import (
     upsert_agent as _upsert_agent,
 )
 from kglite_docs.embed import make_embedder
+from kglite_docs.errors import NotIndexedError
 from kglite_docs.ingest.pipeline import IngestResult
 from kglite_docs.ingest.pipeline import ingest_document as _ingest_doc
 from kglite_docs.schema import (
     CHUNK,
     CHUNK_TEXT_COL,
     LABEL_EMBEDDED,
+    LABEL_READY,
 )
 from kglite_docs.store import Store
 from kglite_docs.tagging import (
@@ -283,6 +286,18 @@ class Corpus:
         rows_ = _df_to_dicts(self._store.cypher(q, params=params))
         return int(rows_[0]["n"]) if rows_ else 0
 
+    def _embedding_coverage(self) -> tuple[int, int]:
+        """Corpus-wide ``(embedded, ready)`` chunk counts — the basis for the
+        loud-retrieval signal in :meth:`search`. ``embedded + unembedded ==
+        ready`` always holds (embedded is derived from :meth:`count_unembedded`,
+        which tracks the authoritative ``c.embedded`` property)."""
+        rows_ = _df_to_dicts(self._store.cypher(
+            f"MATCH (c:Chunk:{LABEL_READY}) RETURN count(c) AS n"
+        ))
+        ready = int(rows_[0]["n"]) if rows_ else 0
+        embedded = ready - self.count_unembedded()
+        return embedded, ready
+
     def index(
         self,
         *,
@@ -491,6 +506,21 @@ class Corpus:
         agent_id: str | None = None,
         with_summaries: bool = False,
     ) -> list[SearchHit]:
+        # Honest coverage: an unindexed corpus must be a loud signal, not a
+        # silent []. 0 embedded (but chunks exist) → raise; partial → warn.
+        embedded, ready = self._embedding_coverage()
+        if ready > 0 and embedded == 0:
+            raise NotIndexedError(
+                f"0 of {ready} ready chunk(s) are embedded — call index() "
+                "(or ingest(embed=True)) before search()."
+            )
+        if 0 < embedded < ready:
+            warnings.warn(
+                f"searching {embedded}/{ready} embedded chunk(s); "
+                f"{ready - embedded} unembedded are invisible — "
+                "run index() for full coverage.",
+                stacklevel=2,
+            )
         q_vec = self._embedder.embed([query])[0]
         hits = self._store.vector_search(
             CHUNK, CHUNK_TEXT_COL, q_vec, top_k=top_k, filters=filters

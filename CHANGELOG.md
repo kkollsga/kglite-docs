@@ -18,8 +18,22 @@ breaking changes (called out below).
   (docs, pages, chunks, embedded/unembedded, image_pages, pending_ocr, studies)
   — the first thing to check. Pages now persist `extractable_alnum` at ingest;
   pages ingested before this release count as low-text until re-ingested.
+- **`compose_context()` now reports `searched_fraction` (FEAT-3):** the share of
+  the corpus actually searchable (embedded chunks ÷ ready chunks). `1.0` = full
+  coverage; `< 1.0` means part of the corpus was invisible to the query.
 
 ### Fixed
+- **Retrieval over an unindexed corpus is now a loud signal, not a silent `[]`
+  (BUG-2).** `search()` / `compose_context()` used to return `[]` when *nothing*
+  was embedded — indistinguishable from "this query genuinely has no matches,"
+  so an agent would wrongly conclude no evidence exists (amplified by 0.0.6's
+  `embed=False` default). Now: a corpus with ready chunks but **0 embedded**
+  raises `NotIndexedError` (call `index()` / `ingest(embed=True)` first); a
+  **partially** indexed corpus emits a `UserWarning` and exposes the gap via
+  `searched_fraction`; a genuinely empty corpus still returns `[]`.
+  **Behaviour change** for library callers: searching a ready-but-unembedded
+  corpus now raises instead of returning `[]`. The MCP happy path
+  (ingest → index → search) is unaffected.
 - **Image-only PDF pages are now detected for OCR by text density, not "has any
   text at all" (BUG-1).** pymupdf4llm emits a `==> picture … intentionally
   omitted <==` placeholder for image regions, which previously made a scanned

@@ -352,6 +352,7 @@ class ComposedContext(TypedDict):
     query: str
     budget_tokens: int
     used_tokens: int
+    searched_fraction: float
     items: list[ContextItem]
 
 

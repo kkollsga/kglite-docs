@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from kglite_docs import Corpus
+from kglite_docs.errors import NotIndexedError
 
 
 @pytest.mark.mcp
@@ -171,9 +172,10 @@ def test_mcp_document_ingest_index_then_search(corpus: Corpus, tmp_path: Path) -
     assert ing_result["embedded"] == 0
     assert "hint" in ing_result and "index" in ing_result["hint"]
 
-    # Search before indexing returns nothing (chunks aren't embedded yet).
-    pre = _call(app, "search", {"query": "dense retrieval", "top_k": 3}, as_list=True)
-    assert pre == [] or pre is None or pre == {}
+    # Search before indexing is a loud signal, not a silent [] — the corpus
+    # has ready chunks but none embedded (BUG-2/FEAT-3).
+    with pytest.raises(NotIndexedError):
+        corpus.search("dense retrieval", top_k=3)
 
     idx = _call(app, "document", {"action": "index"})
     assert isinstance(idx, dict)

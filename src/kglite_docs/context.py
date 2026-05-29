@@ -30,6 +30,7 @@ def compose_context(
           "query": ...,
           "budget_tokens": ...,
           "used_tokens": ...,
+          "searched_fraction": ...,   # embedded / ready chunks (1.0 = full)
           "items": [
             {
               "chunk_id": ..., "doc_id": ..., "page": ...,
@@ -73,9 +74,11 @@ def compose_context(
         })
         used += tokens
         per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
+    embedded, ready = corpus._embedding_coverage()
     return {
         "query": query,
         "budget_tokens": max_tokens,
         "used_tokens": used,
         "items": items,
+        "searched_fraction": (embedded / ready) if ready else 1.0,
     }
