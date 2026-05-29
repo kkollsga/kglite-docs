@@ -47,11 +47,27 @@ def cluster_chunks(
     created_at = _now()
 
     if algorithm == "louvain":
-        # Use kglite's louvain over the SIMILAR_TO graph if present, else
-        # fall back to an embedding-driven approach via .compare()/cluster.
-        try:
-            rows = _df_dicts(store.cypher("CALL louvain() YIELD node, community RETURN node.id AS chunk_id, community AS community"))
-        except Exception:
+        # Louvain is only meaningful over a chunk-similarity graph (SIMILAR_TO
+        # edges). Without one, bare `CALL louvain()` clusters the *structural*
+        # graph — Pages and the Document too — and we'd then write IN_CLUSTER
+        # edges whose non-chunk endpoints get vivified as phantom Chunk stubs.
+        # So only run louvain when SIMILAR_TO exists; otherwise fall back to
+        # embedding-driven k-means (which reads chunk embeddings directly).
+        sim = _df_dicts(store.cypher("MATCH ()-[r:SIMILAR_TO]->() RETURN count(r) AS n"))
+        has_similarity = bool(sim) and int(sim[0]["n"]) > 0
+        rows = []
+        if has_similarity:
+            try:
+                raw = _df_dicts(store.cypher(
+                    "CALL louvain() YIELD node, community "
+                    "RETURN node.id AS chunk_id, labels(node) AS lbls, "
+                    "community AS community"
+                ))
+                # Keep only chunk communities — louvain ranges over all nodes.
+                rows = [r for r in raw if CHUNK in (r.get("lbls") or [])]
+            except Exception:
+                rows = []
+        if not rows:
             # Fall back to embedding-based clustering with k=auto
             rows = _embedding_cluster(store, algorithm="louvain", **params)
     elif algorithm in ("kmeans", "dbscan"):

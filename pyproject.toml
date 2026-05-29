@@ -124,3 +124,10 @@ markers = [
     "embed: tests that require the real bge-m3 model (slow; skipped if model not available)",
     "mcp: tests that exercise the MCP server surface",
 ]
+filterwarnings = [
+    # pymupdf ships SWIG-generated bindings that trip a CPython 3.12+
+    # DeprecationWarning on import — third-party, not fixable here. Scope the
+    # ignore tightly to those exact messages so our own warnings stay loud.
+    "ignore:builtin type Swig.* has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]

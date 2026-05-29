@@ -34,6 +34,17 @@ breaking changes (called out below).
   **Behaviour change** for library callers: searching a ready-but-unembedded
   corpus now raises instead of returning `[]`. The MCP happy path
   (ingest → index → search) is unaffected.
+- **`cluster_chunks(algorithm="louvain")` no longer pollutes the graph with
+  phantom `Chunk` stubs.** Bare `CALL louvain()` clusters the *structural*
+  graph (Pages + the Document, not just chunks), so the resulting `IN_CLUSTER`
+  edges vivified non-chunk endpoints as stub `Chunk` nodes. Louvain now runs
+  only when a `SIMILAR_TO` chunk-similarity graph exists (its documented
+  precondition) and filters results to chunk nodes; otherwise it falls back to
+  embedding k-means — which is what the corpus does today, so the behaviour is
+  the same minus the stray stubs.
+- Test runs are now warning-clean: the `IN_CLUSTER` stub warning is fixed at the
+  source, and pymupdf's third-party SWIG `DeprecationWarning`s are filtered
+  (tightly scoped in `pyproject.toml` so our own warnings stay loud).
 - **Image-only PDF pages are now detected for OCR by text density, not "has any
   text at all" (BUG-1).** pymupdf4llm emits a `==> picture … intentionally
   omitted <==` placeholder for image regions, which previously made a scanned
