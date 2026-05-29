@@ -49,6 +49,7 @@ OF_STUDY: Final = "OF_STUDY"                  # Assessment → Study (mirrors OF
 CHECKED_OUT: Final = "CHECKED_OUT"            # Checkout → Chunk (the punched cards)
 HOLDS: Final = "HOLDS"                        # Agent → Checkout
 USED_CONTEXT: Final = "USED_CONTEXT"          # Assessment → Chunk (neighbors read to interpret the focal chunk)
+SUPERSEDES: Final = "SUPERSEDES"              # Assessment → Assessment (the one it replaces)
 
 # Punchcard lease: a checkout older than this is treated as abandoned and
 # its chunks become claimable again (and are GC'd on the next claim).

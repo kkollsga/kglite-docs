@@ -50,6 +50,7 @@ from kglite_docs.schema import (
     STUDY,
     STUDY_CLOSED,
     STUDY_OPEN,
+    SUPERSEDES,
     USED_CONTEXT,
     VALID_ASSESSMENT_VERDICTS,
     VALID_PROVENANCE,
@@ -350,6 +351,46 @@ def assess(
     }
 
 
+def supersede_assessment(
+    store: Store,
+    *,
+    old_id: str,
+    stance: str,
+    weight: float,
+    agent_id: str,
+    rationale: str = "",
+    model: str = "",
+    provenance: str = PROVENANCE_DEFAULT,
+    context_chunk_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Audit-preserving correction: record a new assessment that explicitly
+    *supersedes* an existing one (`(:Assessment)-[:SUPERSEDES]->(:Assessment)`).
+
+    The old assessment is **never deleted** — the correction trail stays
+    legible — but `ledger`/tallies hide it by default (current-by-default), so a
+    cross-agent correction yields one current row per chunk instead of two
+    competing ones (BUG-4). The replacement inherits the old assessment's study
+    and chunk; pass the new stance/weight/rationale/provenance."""
+    old = _df_dicts(store.cypher(
+        "MATCH (o:Assessment {id: $id}) RETURN o.study_id AS study_id, o.chunk_id AS chunk_id",
+        params={"id": old_id},
+    ))
+    if not old or not old[0].get("study_id"):
+        raise InvalidEnumError(f"assessment not found: {old_id}")
+
+    res = assess(
+        store, study_id=old[0]["study_id"], chunk_id=old[0]["chunk_id"],
+        stance=stance, weight=weight, rationale=rationale, agent_id=agent_id,
+        model=model, provenance=provenance, context_chunk_ids=context_chunk_ids,
+    )
+    store.upsert_edges(
+        SUPERSEDES, [{"src": res["assessment_id"], "dst": old_id}],
+        source_type=ASSESSMENT, target_type=ASSESSMENT,
+    )
+    res["supersedes"] = old_id
+    return res
+
+
 def verify_assessment(
     store: Store,
     *,
@@ -435,16 +476,19 @@ def ledger(
     min_weight: float | None = None,
     verified_only: bool = False,
     doc_id: str | None = None,
+    include_superseded: bool = False,
     limit: int = 200,
 ) -> dict[str, Any]:
     """Weight-ranked evidence ledger for a study — the orchestrator's one call.
 
     Dedups to the latest assessment per (chunk, agent), ranks by weight DESC.
-    `stance` ("supports"/"against"/"neutral") and `verified_only` filter via
-    label predicates; `doc_id` scopes to one document. Returns `rows` plus
-    support/against `tallies`, and — for honest coverage — `total` (matches
-    before the `limit`) and `returned` (rows handed back); `total > returned`
-    means the ledger was truncated.
+    `stance` ("supports"/"against"/"neutral"/"deferred") and `verified_only`
+    filter via label predicates; `doc_id` scopes to one document. **Current-by-
+    default:** assessments explicitly superseded (FEAT-5) are hidden unless
+    `include_superseded=True` (each row carries a `superseded` flag). Returns
+    `rows` plus support/against `tallies`, and — for honest coverage — `total`
+    (matches before the `limit`) and `returned` (rows handed back); `total >
+    returned` means the ledger was truncated.
     """
     meta = _df_dicts(store.cypher(
         "MATCH (s:Study {id: $id}) RETURN s.question AS question, s.status AS status",
@@ -468,10 +512,20 @@ def ledger(
     if doc_id:
         pre_where = "WHERE c.doc_id = $doc_id"
         params["doc_id"] = doc_id
-    post_where = ""
+    # Assessments an explicit SUPERSEDES edge points at — hidden by default.
+    # (EXISTS{} isn't projectable in a WITH on this engine, so resolve the set
+    # up front and filter by id; the ledger already reads latest.id/latest.weight
+    # off the collected node, so this is safe.)
+    superseded_ids = _superseded_ids(store, study_id)
+
+    post_conds = []
     if min_weight is not None:
-        post_where = "WHERE latest.weight >= $minw"
+        post_conds.append("latest.weight >= $minw")
         params["minw"] = float(min_weight)
+    if not include_superseded and superseded_ids:
+        post_conds.append("NOT latest.id IN $superseded")
+        params["superseded"] = list(superseded_ids)
+    post_where = ("WHERE " + " AND ".join(post_conds)) if post_conds else ""
 
     # Shared MATCH + dedup prefix — reused for the row query and the total count
     # so `total` counts exactly the latest-per-(chunk,agent) groups the rows
@@ -500,6 +554,7 @@ def ledger(
         node_labels = r.pop("labels", []) or []
         r["verification_status"] = _verification_from_labels(node_labels)
         r["provenance"] = _provenance_from_labels(node_labels)
+        r["superseded"] = r["assessment_id"] in superseded_ids
     # Attach each row's USED_CONTEXT span (the neighbor chunks the agent read
     # to judge it) so retrieval can pull the full relevant span.
     ids = [r["assessment_id"] for r in rows if r.get("assessment_id")]
@@ -622,6 +677,18 @@ def _study_exists(store: Store, study_id: str) -> bool:
     return bool(df)
 
 
+def _superseded_ids(store: Store, study_id: str) -> set[str]:
+    """Ids of this study's assessments that an explicit SUPERSEDES edge points
+    at (i.e. have been corrected) — hidden from the current ledger/tallies."""
+    return {
+        r["id"] for r in _df_dicts(store.cypher(
+            "MATCH (:Assessment)-[:SUPERSEDES]->(o:Assessment)-[:OF_STUDY]->(:Study {id: $id}) "
+            "RETURN DISTINCT o.id AS id",
+            params={"id": study_id},
+        ))
+    }
+
+
 def _verification_from_labels(node_labels: list[str]) -> str:
     for lbl in node_labels:
         if lbl != "Unverified" and lbl in _ASSESS_LABEL_SET and lbl in _VSTATUS_BY_LABEL:
@@ -639,14 +706,23 @@ def _provenance_from_labels(node_labels: list[str]) -> str:
 
 
 def _tallies(store: Store, study_id: str) -> dict[str, Any]:
-    """Counts + summed weight per stance, deduped to latest per (chunk, agent)."""
+    """Counts + summed weight per stance, deduped to latest per (chunk, agent).
+    Reflects *current* truth — superseded assessments (FEAT-5) are excluded so
+    the tallies match the default ledger."""
+    superseded_ids = _superseded_ids(store, study_id)
+    params: dict[str, Any] = {"id": study_id}
+    sup_filter = ""
+    if superseded_ids:
+        sup_filter = "WHERE NOT latest.id IN $superseded "
+        params["superseded"] = list(superseded_ids)
     df = store.cypher(
         "MATCH (c:Chunk)-[:ASSESSED_AS]->(a:Assessment)-[:OF_STUDY]->(:Study {id: $id}) "
         "WITH c, a.by_agent AS ag, a ORDER BY a.created_at DESC "
         "WITH c, ag, collect(a)[0] AS latest "
+        f"{sup_filter}"
         "WITH latest.stance AS stance, latest.weight AS wt "
         "RETURN stance, count(*) AS n, sum(wt) AS w",
-        params={"id": study_id},
+        params=params,
     )
     out: dict[str, Any] = {
         "supports": 0, "against": 0, "neutral": 0, "deferred": 0,

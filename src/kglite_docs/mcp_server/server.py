@@ -96,8 +96,12 @@ embeddings; iterate chunks via study("next"), so you can skip index):
           checked — the ledger surfaces it so unread/paraphrase-based calls show.
   3. study("ledger", study_id=sid)            — weight-ranked evidence + tallies
      study("ledger", study_id=sid, stance="supports")   — just the supporting side
+     — current-by-default: corrected assessments are hidden; pass
+       include_superseded=True for the full history.
   4. study("verify", assessment_id=..., verdict="verified"|"disputed"|
            "duplicate", verifier_agent_id="checker")    — 2nd-agent check
+     study("supersede", assessment_id=old, stance=..., weight=..., agent_id=...)
+       — correct another agent's row to one current winner (audit-preserving).
   5. study("conclude", study_id=sid, text="...", agent_id="lead")
   Manage studies with study("list") / get / reopen / delete.
 

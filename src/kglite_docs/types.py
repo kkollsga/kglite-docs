@@ -434,6 +434,7 @@ class AssessmentRow(TypedDict, total=False):
     rationale: str
     by_agent: str
     verification_status: AssessmentStatus
+    superseded: bool
     context_chunk_ids: list[str]
     text: str
 

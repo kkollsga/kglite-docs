@@ -806,6 +806,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         doc_id: str | None = None,
         min_weight: float | None = None,
         verified_only: bool = False,
+        include_superseded: bool = False,
         status: str | None = None,
         created_by: str | None = None,
         embed: bool = False,
@@ -835,7 +836,14 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           had to read to interpret this one (e.g. from `chunk("get", window=…)`).
           They're recorded so the ledger can pull the full span later and so
           they're excluded from the work-list (no one re-judges them).
-          Append-only (re-assessing supersedes). Never embeds.
+          Append-only; never embeds.
+        - **`supersede`** — audit-preserving correction: record a new assessment
+          that replaces an existing one. Requires `assessment_id` (the old one)
+          plus the new `stance`/`weight`/`agent_id` (and optional `rationale`/
+          `model`/`provenance`); inherits the old one's study+chunk. The old
+          assessment is kept but hidden from the ledger by default — use this
+          (not a bare `assess`) to correct *another agent's* row to one current
+          winner per chunk.
         - **`next`** — pull the next chunks to assess (in reading order).
           **Pass `agent_id` to claim them** — a punchcard checkout that stops
           parallel analysts from grabbing the same chunks; claims auto-expire
@@ -846,8 +854,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         - **`ledger`** — weight-ranked evidence + support/against tallies.
           Requires `study_id`; optional `stance` (→ just the supporting or
           contradicting side), `min_weight`, `verified_only`, `doc_id` (scope to
-          one document), `limit`. Reports `total`/`returned` so truncation is
-          visible (`total > returned` ⇒ raise `limit` to see the rest).
+          one document), `include_superseded` (default false — corrected
+          assessments are hidden; pass true for the full history), `limit`.
+          Reports `total`/`returned` so truncation is visible (`total > returned`
+          ⇒ raise `limit` to see the rest).
         - **`verify`** — a second agent checks an assessment. Requires
           `assessment_id`, `verdict` (`verified`/`disputed`/`duplicate` —
           `duplicate` = "same as another"), `verifier_agent_id`; optional
@@ -898,6 +908,18 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             )
             _persist(corpus)
             return r
+        if action == "supersede":
+            r = corpus.supersede_assessment(
+                _require(assessment_id, "assessment_id", action, "study"),
+                stance=_require(stance, "stance", action, "study"),
+                weight=_require(weight, "weight", action, "study"),
+                agent_id=_require(agent_id, "agent_id", action, "study"),
+                rationale=rationale, model=model,
+                provenance=provenance or "primary_text",
+                context_chunk_ids=context_chunk_ids,
+            )
+            _persist(corpus)
+            return r
         if action == "next":
             r = corpus.next_unassessed(
                 _require(study_id, "study_id", action, "study"),
@@ -910,7 +932,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return corpus.study_ledger(
                 _require(study_id, "study_id", action, "study"),
                 stance=stance, min_weight=min_weight,
-                verified_only=verified_only, doc_id=doc_id, limit=limit,
+                verified_only=verified_only, doc_id=doc_id,
+                include_superseded=include_superseded, limit=limit,
             )
         if action == "verify":
             r = corpus.verify_assessment(
@@ -948,6 +971,6 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             _persist(corpus)
             return r
         raise ValueError(
-            f"study(): unknown action {action!r}. Valid: define, assess, next, "
-            "ledger, verify, conclude, list, get, reopen, delete",
+            f"study(): unknown action {action!r}. Valid: define, assess, supersede, "
+            "next, ledger, verify, conclude, list, get, reopen, delete",
         )

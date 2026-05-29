@@ -369,6 +369,69 @@ def test_verify_records_provenance_without_changing_assessment(
     assert corpus.study_ledger(sid)["rows"][0]["provenance"] == "characterization"
 
 
+def test_supersede_resolves_cross_agent_correction(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-5/BUG-4: agent a2 supersedes a1's row → one current winner per chunk;
+    the old is hidden by default, shown with include_superseded, never deleted."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    first = corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="prefilter")
+    old_id = first["assessment_id"]
+    new = corpus.supersede_assessment(old_id, stance="against", weight=0.6,
+                                      agent_id="analyst", rationale="prefilter was wrong")
+    assert new["supersedes"] == old_id
+
+    # Default ledger: one current row for this chunk — the correction (a2).
+    cur = [r for r in corpus.study_ledger(sid)["rows"] if r["chunk_id"] == ch[0]]
+    assert len(cur) == 1
+    assert cur[0]["assessment_id"] == new["assessment_id"]
+    assert cur[0]["stance"] == "against" and cur[0]["superseded"] is False
+
+    # History: both rows; the old one flagged superseded.
+    hist = {r["assessment_id"]: r for r in
+            corpus.study_ledger(sid, include_superseded=True)["rows"]
+            if r["chunk_id"] == ch[0]}
+    assert set(hist) == {old_id, new["assessment_id"]}
+    assert hist[old_id]["superseded"] is True
+    assert hist[new["assessment_id"]]["superseded"] is False
+
+
+def test_supersede_tallies_and_counts_are_current(corpus: Corpus, tmp_path: Path) -> None:
+    """Tallies + total/returned reflect the post-supersede current set."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    a = corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1")
+    corpus.supersede_assessment(a["assessment_id"], stance="against", weight=0.5, agent_id="a2")
+
+    led = corpus.study_ledger(sid)
+    assert led["tallies"]["supports"] == 0   # the superseded support is gone
+    assert led["tallies"]["against"] == 1
+    assert led["total"] == led["returned"] == 1
+    # include_superseded widens the count.
+    assert corpus.study_ledger(sid, include_superseded=True)["total"] == 2
+
+
+def test_supersede_keeps_audit_edge_and_old_node(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    a = corpus.assess(sid, ch[0], stance="neutral", weight=0.2, agent_id="a1")
+    old_id = a["assessment_id"]
+    new = corpus.supersede_assessment(old_id, stance="supports", weight=0.8, agent_id="a2")
+    edge = corpus.cypher(
+        "MATCH (n:Assessment {id: $new})-[:SUPERSEDES]->(o:Assessment {id: $old}) "
+        "RETURN o.id AS old", params={"new": new["assessment_id"], "old": old_id},
+    ).to_list()
+    assert edge and edge[0]["old"] == old_id           # edge exists
+    still = corpus.cypher("MATCH (o:Assessment {id: $id}) RETURN o.id AS id",
+                          params={"id": old_id}).to_list()
+    assert still and still[0]["id"] == old_id          # old node not deleted
+
+
+def test_supersede_unknown_assessment_raises(corpus: Corpus, tmp_path: Path) -> None:
+    _ingest_chunks(corpus, tmp_path)
+    with pytest.raises(InvalidEnumError):
+        corpus.supersede_assessment("nope", stance="supports", weight=0.5, agent_id="a1")
+
+
 def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
     """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
     ch = _ingest_chunks(corpus, tmp_path)

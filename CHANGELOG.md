@@ -8,6 +8,16 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — evidence integrity
+- **`study("supersede", …)` + current-by-default ledger (FEAT-5, BUG-4).**
+  Audit-preserving correction: `supersede_assessment(old_id, …)` records a
+  replacement assessment linked to the one it corrects by an explicit
+  `(:Assessment)-[:SUPERSEDES]->(:Assessment)` edge. `study_ledger` and its
+  tallies are now **current-by-default** — a superseded assessment is hidden
+  (each row carries a `superseded` flag), with `include_superseded=True` for the
+  full history. This resolves the cross-agent ambiguity where a pre-filter's row
+  and an analyst's correction both showed with no winner, **without** weakening
+  multi-agent coexistence (only *explicitly* superseded rows drop out). The old
+  assessment is never deleted — the correction trail stays legible.
 - **Provenance axis on assessments (FEAT-4).** Each `assess` now records
   `provenance` — *what was actually checked* (the basis), distinct from `weight`
   (the strength): `primary_text` (read the source — default),

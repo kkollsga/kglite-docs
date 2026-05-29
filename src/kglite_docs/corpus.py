@@ -1114,19 +1114,39 @@ class Corpus:
             context_chunk_ids=context_chunk_ids,
         )
 
+    def supersede_assessment(
+        self, old_id: str, *,
+        stance: Stance, weight: float, agent_id: str,
+        rationale: str = "", model: str = "",
+        provenance: Provenance = "primary_text",
+        context_chunk_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Audit-preserving correction: record a new assessment that explicitly
+        supersedes `old_id` (a `SUPERSEDES` edge). The old one is kept but hidden
+        from `study_ledger` by default — resolving cross-agent corrections to a
+        single current row per chunk. Inherits the old assessment's study+chunk."""
+        return study_mod.supersede_assessment(
+            self._store, old_id=old_id, stance=stance, weight=weight,
+            agent_id=agent_id, rationale=rationale, model=model,
+            provenance=provenance, context_chunk_ids=context_chunk_ids,
+        )
+
     def study_ledger(
         self, study_id: str, *,
         stance: Stance | None = None, min_weight: float | None = None,
-        verified_only: bool = False, doc_id: str | None = None, limit: int = 200,
+        verified_only: bool = False, doc_id: str | None = None,
+        include_superseded: bool = False, limit: int = 200,
     ) -> Ledger:
         """Weight-ranked evidence ledger for a study + support/against tallies.
         Pass `stance="supports"`/`"against"` to retrieve just that side, or
-        `doc_id=` to scope to one document. The result reports `total` (matches
-        before `limit`) and `returned`; `total > returned` means it was clipped."""
+        `doc_id=` to scope to one document. Current-by-default: superseded
+        assessments are hidden unless `include_superseded=True` (each row carries
+        a `superseded` flag). The result reports `total` (matches before `limit`)
+        and `returned`; `total > returned` means it was clipped."""
         return cast(Ledger, study_mod.ledger(
             self._store, study_id=study_id, stance=stance,
             min_weight=min_weight, verified_only=verified_only,
-            doc_id=doc_id, limit=limit,
+            doc_id=doc_id, include_superseded=include_superseded, limit=limit,
         ))
 
     def verify_assessment(
