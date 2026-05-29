@@ -162,6 +162,7 @@ def ingest_document(
             "markdown": p.markdown,
             "width_pt": p.width_pt,
             "height_pt": p.height_pt,
+            "image_block_count": p.image_block_count,
         }
         for p in pages
     ]

@@ -207,7 +207,7 @@ def _parse_image(path: Path) -> list[PageContent]:
     return [PageContent(
         page_number=1, markdown="",
         has_text=False, has_images=True, needs_ocr=True,
-        width_pt=width, height_pt=height,
+        width_pt=width, height_pt=height, image_block_count=1,
     )]
 
 

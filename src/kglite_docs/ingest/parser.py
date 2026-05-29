@@ -8,12 +8,41 @@ that need the OCR loop.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pymupdf
 import pymupdf4llm
+
+# A page that carries images but fewer than this many extractable
+# alphanumeric chars is treated as image-only and routed to OCR. Tunable:
+# a scanned exhibit yields ~0 real chars (just a "picture omitted" marker
+# and/or a short footer); a genuine text page yields hundreds+.
+OCR_TEXT_THRESHOLD = 120
+
+# pymupdf4llm emits placeholders like `==> picture … intentionally omitted <==`
+# for image regions; these are not real extractable text.
+_IMG_PLACEHOLDER_RE = re.compile(r"(?is)==>.*?<==")
+_OMITTED_LINE_RE = re.compile(r"(?im)^.*intentionally omitted.*$")
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+
+
+def _extractable_alnum(markdown: str) -> int:
+    """Count real extractable alphanumeric chars, ignoring pymupdf4llm image
+    placeholders / markdown image syntax. Used to tell a text page from a
+    scanned-image page whose only "text" is a placeholder."""
+    cleaned = _IMG_PLACEHOLDER_RE.sub(" ", markdown or "")
+    cleaned = _OMITTED_LINE_RE.sub(" ", cleaned)
+    cleaned = _MD_IMAGE_RE.sub(" ", cleaned)
+    return sum(1 for c in cleaned if c.isalnum())
+
+
+def _needs_ocr(markdown: str, has_images: bool) -> bool:
+    """True when a page has image content but negligible real text — i.e. a
+    scanned/image-only page that must be OCR'd to be analyzed."""
+    return has_images and _extractable_alnum(markdown) < OCR_TEXT_THRESHOLD
 
 
 @dataclass
@@ -24,9 +53,10 @@ class PageContent:
     markdown: str
     has_text: bool
     has_images: bool
-    needs_ocr: bool  # text-empty AND has images
+    needs_ocr: bool  # image content but < OCR_TEXT_THRESHOLD extractable chars
     width_pt: float
     height_pt: float
+    image_block_count: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -47,16 +77,18 @@ def parse_pdf(path: str | Path) -> list[PageContent]:
             page = doc[i]
             markdown = (page_md.get("text") or "").strip()
             has_text = bool(markdown)
-            has_images = bool(page.get_images(full=False))
+            image_block_count = len(page.get_images(full=False))
+            has_images = image_block_count > 0
             out.append(
                 PageContent(
                     page_number=i + 1,
                     markdown=markdown,
                     has_text=has_text,
                     has_images=has_images,
-                    needs_ocr=(not has_text) and has_images,
+                    needs_ocr=_needs_ocr(markdown, has_images),
                     width_pt=float(page.rect.width),
                     height_pt=float(page.rect.height),
+                    image_block_count=image_block_count,
                     metadata={
                         k: v
                         for k, v in page_md.items()

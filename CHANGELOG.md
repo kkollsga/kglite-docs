@@ -7,6 +7,15 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Fixed
+- **Image-only PDF pages are now detected for OCR by text density, not "has any
+  text at all" (BUG-1).** pymupdf4llm emits a `==> picture … intentionally
+  omitted <==` placeholder for image regions, which previously made a scanned
+  page count as `ready` and hid it from `ocr_status()`. A page with image
+  content but fewer than `OCR_TEXT_THRESHOLD` (~120) real alphanumeric chars is
+  now flagged `needs_ocr`. Pages also carry an `image_block_count` (for the
+  upcoming coverage report). Honest-coverage: unreadable pages are observable.
+
 ## [0.0.6] — 2026-05-29
 
 ### Added — evidence-study workflow (new `study` MCP noun)
