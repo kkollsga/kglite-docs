@@ -58,6 +58,10 @@ ExportFormat = Literal["md", "docx", "pdf"]
 #: Stance of an evidence `Assessment` toward a `Study`'s question.
 Stance = Literal["supports", "against", "neutral", "deferred"]
 
+#: Provenance of an `Assessment` — what was actually checked (the basis), as
+#: opposed to `weight` (the strength).
+Provenance = Literal["primary_text", "characterization", "scanned_unread"]
+
 #: Verdict a second agent assigns when verifying an `Assessment`.
 AssessmentVerdict = Literal["verified", "disputed", "duplicate"]
 
@@ -426,6 +430,7 @@ class AssessmentRow(TypedDict, total=False):
     page: int
     stance: Stance
     weight: float
+    provenance: Provenance
     rationale: str
     by_agent: str
     verification_status: AssessmentStatus
@@ -465,6 +470,6 @@ __all__ = [
     "TagKind", "TagRow",
     "TargetKind",
     "TranslationStatus",
-    "Stance", "AssessmentVerdict", "AssessmentStatus", "StudyStatus",
+    "Stance", "Provenance", "AssessmentVerdict", "AssessmentStatus", "StudyStatus",
     "StudyRow", "AssessmentRow", "Ledger",
 ]

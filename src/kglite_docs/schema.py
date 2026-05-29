@@ -106,6 +106,16 @@ VALID_STANCES: Final = frozenset(
     {STANCE_SUPPORTS, STANCE_AGAINST, STANCE_NEUTRAL, STANCE_DEFERRED}
 )
 
+# Evidence-study: provenance of an Assessment — *what was actually checked* to
+# reach it (the basis), orthogonal to `weight` (the strength).
+PROVENANCE_PRIMARY: Final = "primary_text"        # read the actual source text
+PROVENANCE_CHARACTERIZATION: Final = "characterization"  # a paraphrase/summary, not the source
+PROVENANCE_SCANNED_UNREAD: Final = "scanned_unread"      # a scan no one actually read (provisional)
+PROVENANCE_DEFAULT: Final = PROVENANCE_PRIMARY
+VALID_PROVENANCE: Final = frozenset(
+    {PROVENANCE_PRIMARY, PROVENANCE_CHARACTERIZATION, PROVENANCE_SCANNED_UNREAD}
+)
+
 # Study lifecycle
 STUDY_OPEN: Final = "open"
 STUDY_CLOSED: Final = "closed"
@@ -168,6 +178,11 @@ LABEL_AGAINST: Final = "Against"
 LABEL_NEUTRAL: Final = "Neutral"
 LABEL_DEFERRED: Final = "Deferred"
 
+# Assessment provenance → labels (`MATCH (a:Assessment:PrimaryText)`)
+LABEL_PRIMARY_TEXT: Final = "PrimaryText"
+LABEL_CHARACTERIZATION: Final = "Characterization"
+LABEL_SCANNED_UNREAD: Final = "ScannedUnread"
+
 # Study lifecycle → labels
 LABEL_OPEN: Final = "Open"
 LABEL_CLOSED: Final = "Closed"
@@ -227,6 +242,12 @@ _STUDY_STANCE_LABELS: Final[dict[str, str]] = {
     STANCE_AGAINST: LABEL_AGAINST,
     STANCE_NEUTRAL: LABEL_NEUTRAL,
     STANCE_DEFERRED: LABEL_DEFERRED,
+}
+
+_ASSESSMENT_PROVENANCE_LABELS: Final[dict[str, str]] = {
+    PROVENANCE_PRIMARY: LABEL_PRIMARY_TEXT,
+    PROVENANCE_CHARACTERIZATION: LABEL_CHARACTERIZATION,
+    PROVENANCE_SCANNED_UNREAD: LABEL_SCANNED_UNREAD,
 }
 
 _STUDY_STATUS_LABELS: Final[dict[str, str]] = {
@@ -293,6 +314,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "study.stance": _STUDY_STANCE_LABELS,
     "study.status": _STUDY_STATUS_LABELS,
     "assessment.verification_status": _ASSESSMENT_STATUS_LABELS,
+    "assessment.provenance": _ASSESSMENT_PROVENANCE_LABELS,
 }
 
 

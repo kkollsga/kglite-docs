@@ -85,6 +85,7 @@ from kglite_docs.types import (
     Ledger,
     OcrStatus,
     PendingOcrRow,
+    Provenance,
     ReviewStats,
     ReviewStatus,
     ReviewTicketDetail,
@@ -1090,6 +1091,7 @@ class Corpus:
         self, study_id: str, chunk_id: str, *,
         stance: Stance, weight: float, agent_id: str,
         rationale: str = "", model: str = "",
+        provenance: Provenance = "primary_text",
         context_chunk_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Record stance (supports/against/neutral/deferred) + probative weight
@@ -1097,13 +1099,19 @@ class Corpus:
         `deferred` = read but unjudgeable yet (blocked/needs evidence): counted
         distinctly and kept in the work-list for a later pass.
 
+        `provenance` records *what was checked* (the basis, vs `weight` the
+        strength): `primary_text` (read the source — default), `characterization`
+        (a paraphrase/summary), or `scanned_unread` (an unread scan; provisional).
+        Surfaced per row in `study_ledger`.
+
         `context_chunk_ids`: neighbor chunks read to interpret the focal one;
         recorded so retrieval pulls the span and they're excluded from the
         work-list (no double-judging)."""
         return study_mod.assess(
             self._store, study_id=study_id, chunk_id=chunk_id,
             stance=stance, weight=weight, rationale=rationale,
-            agent_id=agent_id, model=model, context_chunk_ids=context_chunk_ids,
+            agent_id=agent_id, model=model, provenance=provenance,
+            context_chunk_ids=context_chunk_ids,
         )
 
     def study_ledger(
@@ -1124,12 +1132,14 @@ class Corpus:
     def verify_assessment(
         self, assessment_id: str, *,
         verdict: AssessmentVerdict, verifier_agent_id: str, notes: str = "",
+        provenance: Provenance | None = None,
     ) -> dict[str, Any]:
         """Second-agent check of an assessment: verified / disputed / duplicate.
-        Self-verification is rejected."""
+        Self-verification is rejected. `provenance` (optional) records what the
+        verifier checked — stored on the verification event."""
         return study_mod.verify_assessment(
             self._store, assessment_id=assessment_id, verdict=verdict,
-            verifier_agent_id=verifier_agent_id, notes=notes,
+            verifier_agent_id=verifier_agent_id, notes=notes, provenance=provenance,
         )
 
     def conclude_study(

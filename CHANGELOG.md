@@ -8,6 +8,16 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — evidence integrity
+- **Provenance axis on assessments (FEAT-4).** Each `assess` now records
+  `provenance` — *what was actually checked* (the basis), distinct from `weight`
+  (the strength): `primary_text` (read the source — default),
+  `characterization` (a paraphrase/summary, not the source), or `scanned_unread`
+  (a scan no one actually read — provisional). It's a secondary label on the
+  Assessment, surfaced per row in `study_ledger`, so a conclusion resting on
+  characterizations or unread scans is no longer indistinguishable from one
+  resting on primary text. `verify` takes an optional `provenance` recording what
+  the *verifier* checked (stored on the verification event). Backward-compatible:
+  assessments written before this release read back as `primary_text`.
 - **`deferred` stance for evidence assessments (FEAT-7).** Alongside
   `supports`/`against`/`neutral`, an agent can now assess a chunk as `deferred` —
   "read but can't judge yet" (an image-only / `needs_ocr` chunk, or a claim

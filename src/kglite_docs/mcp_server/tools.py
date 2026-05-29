@@ -793,6 +793,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         chunk_id: str | None = None,
         stance: str | None = None,
         weight: float | None = None,
+        provenance: str | None = None,
         rationale: str = "",
         context_chunk_ids: list[str] | None = None,
         agent_id: str | None = None,
@@ -827,8 +828,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `deferred` = read but can't judge yet, e.g. an image/needs_ocr chunk;
           it's counted distinctly and stays in the work-list), `weight`
           (0..1 probative strength), `agent_id`; optional `rationale`,
-          `model`, and **`context_chunk_ids`** — neighbor chunks you had to
-          read to interpret this one (e.g. from `chunk("get", window=…)`).
+          `model`, **`provenance`** (what you actually checked, surfaced per row
+          in the ledger: `primary_text` = read the source [default],
+          `characterization` = a paraphrase/summary, `scanned_unread` = an unread
+          scan [provisional]), and **`context_chunk_ids`** — neighbor chunks you
+          had to read to interpret this one (e.g. from `chunk("get", window=…)`).
           They're recorded so the ledger can pull the full span later and so
           they're excluded from the work-list (no one re-judges them).
           Append-only (re-assessing supersedes). Never embeds.
@@ -846,8 +850,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           visible (`total > returned` ⇒ raise `limit` to see the rest).
         - **`verify`** — a second agent checks an assessment. Requires
           `assessment_id`, `verdict` (`verified`/`disputed`/`duplicate` —
-          `duplicate` = "same as another"), `verifier_agent_id`. Server
-          rejects self-verification.
+          `duplicate` = "same as another"), `verifier_agent_id`; optional
+          `provenance` (what the verifier checked, recorded on the event).
+          Server rejects self-verification.
         - **`conclude`** — write the study's conclusion (stored as a
           verifiable summary on the study). Requires `study_id`, `text`,
           `agent_id`; optional `embed`.
@@ -888,7 +893,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 weight=_require(weight, "weight", action, "study"),
                 rationale=rationale,
                 agent_id=_require(agent_id, "agent_id", action, "study"),
-                model=model, context_chunk_ids=context_chunk_ids,
+                model=model, provenance=provenance or "primary_text",
+                context_chunk_ids=context_chunk_ids,
             )
             _persist(corpus)
             return r
@@ -913,7 +919,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 verifier_agent_id=_require(
                     verifier_agent_id, "verifier_agent_id", action, "study",
                 ),
-                notes=notes,
+                notes=notes, provenance=provenance,
             )
             _persist(corpus)
             return r

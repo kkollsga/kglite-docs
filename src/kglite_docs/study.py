@@ -45,12 +45,14 @@ from kglite_docs.schema import (
     HAS_VERIFICATION,
     HOLDS,
     OF_STUDY,
+    PROVENANCE_DEFAULT,
     STANCE_DEFERRED,
     STUDY,
     STUDY_CLOSED,
     STUDY_OPEN,
     USED_CONTEXT,
     VALID_ASSESSMENT_VERDICTS,
+    VALID_PROVENANCE,
     VALID_STANCES,
     VERIFICATION_EVENT,
     VERIFIED_BY,
@@ -69,6 +71,11 @@ _VSTATUS_BY_LABEL = {
 }
 _ASSESS_LABEL_SET = set(labels_for("assessment.verification_status"))
 _STANCE_LABEL_SET = set(labels_for("study.stance"))
+# Reverse map: provenance label → user-facing provenance string.
+_PROVENANCE_BY_LABEL = {
+    label_for("assessment.provenance", v): v for v in VALID_PROVENANCE
+}
+_PROVENANCE_LABEL_SET = set(labels_for("assessment.provenance"))
 
 
 def _now() -> str:
@@ -254,6 +261,7 @@ def assess(
     rationale: str = "",
     agent_id: str,
     model: str = "",
+    provenance: str = PROVENANCE_DEFAULT,
     context_chunk_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Record one agent's stance + probative weight + rationale on a chunk,
@@ -273,6 +281,10 @@ def assess(
     if stance not in VALID_STANCES:
         raise InvalidEnumError(
             f"invalid stance: {stance!r} (expected one of {sorted(VALID_STANCES)})"
+        )
+    if provenance not in VALID_PROVENANCE:
+        raise InvalidEnumError(
+            f"invalid provenance: {provenance!r} (expected one of {sorted(VALID_PROVENANCE)})"
         )
     try:
         weight = float(weight)
@@ -294,6 +306,7 @@ def assess(
             "chunk_id": chunk_id,
             "stance": stance,
             "weight": weight,
+            "provenance": provenance,
             "rationale": rationale,
             "by_agent": agent_id,
             "model": model,
@@ -316,6 +329,9 @@ def assess(
     stance_label = label_for("study.stance", stance)
     if stance_label:
         store.add_label(ASSESSMENT, [aid], stance_label)
+    prov_label = label_for("assessment.provenance", provenance)
+    if prov_label:
+        store.add_label(ASSESSMENT, [aid], prov_label)
     init_label = label_for("assessment.verification_status", ASSESSMENT_UNVERIFIED)
     if init_label:
         store.add_label(ASSESSMENT, [aid], init_label)
@@ -329,7 +345,8 @@ def assess(
         )
     return {
         "assessment_id": aid, "study_id": study_id, "chunk_id": chunk_id,
-        "stance": stance, "weight": weight, "context_chunk_ids": ctx,
+        "stance": stance, "weight": weight, "provenance": provenance,
+        "context_chunk_ids": ctx,
     }
 
 
@@ -340,12 +357,21 @@ def verify_assessment(
     verdict: str,
     verifier_agent_id: str,
     notes: str = "",
+    provenance: str | None = None,
 ) -> dict[str, Any]:
     """A second agent verifies an assessment: verified / disputed / duplicate.
-    Self-verification is rejected. Mirrors `enrich.verify_summary`."""
+    Self-verification is rejected. Mirrors `enrich.verify_summary`.
+
+    `provenance` (optional) records what the *verifier* checked (primary_text /
+    characterization / scanned_unread) — stored on the verification event, so a
+    'verified' that was itself based on a characterization is still legible."""
     if verdict not in VALID_ASSESSMENT_VERDICTS:
         raise InvalidEnumError(
             f"invalid verdict: {verdict!r} (expected one of {sorted(VALID_ASSESSMENT_VERDICTS)})"
+        )
+    if provenance is not None and provenance not in VALID_PROVENANCE:
+        raise InvalidEnumError(
+            f"invalid provenance: {provenance!r} (expected one of {sorted(VALID_PROVENANCE)})"
         )
     author_df = _df_dicts(store.cypher(
         "MATCH (a:Agent)-[:AUTHORED]->(x:Assessment {id: $id}) RETURN a.id AS id",
@@ -370,6 +396,7 @@ def verify_assessment(
             "verdict": verdict,
             "verifier_agent_id": verifier_agent_id,
             "notes": notes,
+            "provenance": provenance or "",
             "created_at": now,
         }],
     )
@@ -393,6 +420,7 @@ def verify_assessment(
     return {
         "assessment_id": assessment_id, "status": verdict,
         "verified_at": now, "verified_by": verifier_agent_id, "event_id": event_id,
+        "provenance": provenance or "",
     }
 
 
@@ -471,6 +499,7 @@ def ledger(
     for r in rows:
         node_labels = r.pop("labels", []) or []
         r["verification_status"] = _verification_from_labels(node_labels)
+        r["provenance"] = _provenance_from_labels(node_labels)
     # Attach each row's USED_CONTEXT span (the neighbor chunks the agent read
     # to judge it) so retrieval can pull the full relevant span.
     ids = [r["assessment_id"] for r in rows if r.get("assessment_id")]
@@ -598,6 +627,15 @@ def _verification_from_labels(node_labels: list[str]) -> str:
         if lbl != "Unverified" and lbl in _ASSESS_LABEL_SET and lbl in _VSTATUS_BY_LABEL:
             return _VSTATUS_BY_LABEL[lbl]
     return "unverified"
+
+
+def _provenance_from_labels(node_labels: list[str]) -> str:
+    """Provenance string from an Assessment's labels. Defaults to the historic
+    assumption (`primary_text`) for assessments written before FEAT-4."""
+    for lbl in node_labels:
+        if lbl in _PROVENANCE_LABEL_SET and lbl in _PROVENANCE_BY_LABEL:
+            return _PROVENANCE_BY_LABEL[lbl]
+    return PROVENANCE_DEFAULT
 
 
 def _tallies(store: Store, study_id: str) -> dict[str, Any]:

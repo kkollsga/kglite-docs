@@ -87,10 +87,13 @@ embeddings; iterate chunks via study("next"), so you can skip index):
   2. for ch in study("next", study_id=sid, agent_id="reader-1", doc_id="..."):
         study("assess", study_id=sid, chunk_id=ch["id"],
               stance="supports"|"against"|"neutral"|"deferred", weight=0..1,
-              rationale="...", agent_id="reader-1")
+              rationale="...", agent_id="reader-1",
+              provenance="primary_text"|"characterization"|"scanned_unread")
         — passing agent_id to next CLAIMS the chunks (punchcard), so a
           fan-out of analysts gets disjoint batches and never overlaps.
           One first-class, verifiable record per chunk; re-assessing supersedes.
+          `provenance` (optional, default primary_text) records what you actually
+          checked — the ledger surfaces it so unread/paraphrase-based calls show.
   3. study("ledger", study_id=sid)            — weight-ranked evidence + tallies
      study("ledger", study_id=sid, stance="supports")   — just the supporting side
   4. study("verify", assessment_id=..., verdict="verified"|"disputed"|

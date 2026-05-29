@@ -318,6 +318,57 @@ def test_deferred_chunk_stays_in_work_list(corpus: Corpus, tmp_path: Path) -> No
     assert ch[1] not in remaining, "a judged chunk must drop out"
 
 
+def test_provenance_round_trips_into_ledger(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-4: each provenance value is recorded and surfaced per ledger row."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1",
+                  provenance="primary_text")
+    corpus.assess(sid, ch[1], stance="supports", weight=0.8, agent_id="a1",
+                  provenance="characterization")
+    corpus.assess(sid, ch[2], stance="against", weight=0.7, agent_id="a1",
+                  provenance="scanned_unread")
+    corpus.assess(sid, ch[3], stance="neutral", weight=0.1, agent_id="a1")  # default
+
+    prov = {r["chunk_id"]: r["provenance"] for r in corpus.study_ledger(sid)["rows"]}
+    assert prov[ch[0]] == "primary_text"
+    assert prov[ch[1]] == "characterization"
+    assert prov[ch[2]] == "scanned_unread"
+    assert prov[ch[3]] == "primary_text"   # default when omitted
+
+
+def test_provenance_validation(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    with pytest.raises(InvalidEnumError):
+        corpus.assess(sid, ch[0], stance="supports", weight=0.5, agent_id="a1",
+                      provenance="hearsay")
+
+
+def test_verify_records_provenance_without_changing_assessment(
+    corpus: Corpus, tmp_path: Path,
+) -> None:
+    """FEAT-4: the verifier's provenance is stored on the event; the
+    assessment's own provenance is untouched by verification."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1",
+                  provenance="characterization")
+    aid = corpus.study_ledger(sid)["rows"][0]["assessment_id"]
+
+    res = corpus.verify_assessment(aid, verdict="verified", verifier_agent_id="checker",
+                                   provenance="primary_text")
+    assert res["provenance"] == "primary_text"
+    # The event carries it.
+    ev = corpus.cypher(
+        "MATCH (:Assessment {id: $id})-[:HAS_VERIFICATION]->(e:VerificationEvent) "
+        "RETURN e.provenance AS p", params={"id": aid},
+    ).to_list()
+    assert ev and ev[0]["p"] == "primary_text"
+    # The assessment's own provenance is unchanged.
+    assert corpus.study_ledger(sid)["rows"][0]["provenance"] == "characterization"
+
+
 def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
     """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
     ch = _ingest_chunks(corpus, tmp_path)
