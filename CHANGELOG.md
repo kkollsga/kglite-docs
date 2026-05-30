@@ -29,6 +29,16 @@ breaking changes (called out below).
   work-list never leaks). Two agents disagreeing add `:Contested` (never a silent
   clobber). `study.next_unassessed`'s checkout logic was extracted to the shared
   `checkout.py` (behavior-preserving).
+- **Bundled legal schema pack (`kglite_docs.schemas.load_schema("legal")`).** An
+  opt-in controlled vocabulary of ~18 court-case element types across three
+  families — `legal_role` (`holding`, `reasoning`, `judge_remark`, `settlement`,
+  `disposition_order`, …), `legal_authority` (`statute`, `case_citation`, …), and
+  `legal_evidence` (`testimony`, `documentary`, …) — plus a detection rubric
+  (`rubric_text()`) an agent reads to classify consistently. It's **data only**:
+  the vocabulary registers through the generic seam, so the engine never names a
+  legal term (boundary principle intact). Multi-label, jurisdiction-neutral
+  (common + civil law; illustrative PT/PROJUDI mappings). A classified corpus then
+  routes by label predicate: `MATCH (c:Chunk:JudgeRemark)`.
 
 ## [0.0.11] — 2026-05-30
 
