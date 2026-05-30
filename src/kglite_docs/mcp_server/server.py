@@ -43,10 +43,15 @@ standalone functions.
   agent(action, ...)      upsert | get | list | activity
   review(action, ...)     enqueue | enqueue_chunks | claim_next | claim |
                           unclaim | complete | list | get | stats
-  ocr(action, ...)        status | pending | request | submit
+  ocr(action, ...)        status | pending | illegible | request | submit |
+                          export | import
                           (no engine ships — YOU transcribe: request a
-                           needs_ocr page → get its image + a verbatim prompt
-                           → submit. agent_type routes to an OCR subagent.)
+                           needs_ocr page → get its image(s) + a verbatim prompt
+                           → submit. Use Sonnet (default) / Opus for hard pages;
+                           NOT small models — they fabricate. ocr("illegible")
+                           lists pages that came back unreadable; re-request with
+                           force=True to escalate. agent_type routes to an OCR
+                           subagent.)
   cluster(action, ...)    run | get | list | export
   translate(action, ...)  add | list | assemble
 

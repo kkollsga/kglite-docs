@@ -7,6 +7,14 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — OCR model guidance
+- The `request_ocr` task now carries a `recommended_model` (`claude-sonnet-4-6`)
+  + `model_guidance`, and `_INSTRUCTIONS` documents the tier: **Sonnet** default,
+  **Opus** for the hardest/decisive pages, and **avoid small models for
+  legal/forensic OCR** — A/B testing found Haiku corrupted names and *fabricated
+  an entire false document* (contamination, not low quality). kglite-docs bundles
+  no model; this is guidance only.
+
 ### Added — OCR export/import sidecar + OCR'd chunks are first-class
 - **`ocr("export", doc_id)`** writes a document's OCR to a sidecar JSON
   (`<source>.ocr.json`) — `{source_file, doc_id, generated_at, by_model,

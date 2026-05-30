@@ -62,3 +62,11 @@ def test_request_on_ready_page_raises(corpus: Corpus, tmp_path: Path) -> None:
 def test_request_needs_an_identifier(corpus: Corpus) -> None:
     with pytest.raises(InvalidEnumError):
         corpus.request_ocr(agent_id="lead")  # neither page_id nor doc_id+page_number
+
+
+def test_request_carries_model_guidance(corpus: Corpus, tmp_path: Path) -> None:
+    pid = _pending_page_id(corpus, tmp_path)
+    task = corpus.request_ocr(page_id=pid, agent_id="lead")
+    assert task["recommended_model"] == "claude-sonnet-4-6"
+    g = task["model_guidance"].lower()
+    assert "sonnet" in g and "opus" in g and "haiku" in g  # default / escalate / avoid

@@ -52,6 +52,18 @@ OCR_PROMPT = (
 )
 
 
+#: Model tier guidance for OCR (A/B-tested on legal scans). We bundle no model —
+#: the agent is the engine — but the right tier matters: small models don't just
+#: do *worse* OCR, they **contaminate** (corrupt names; fabricate whole documents).
+RECOMMENDED_OCR_MODEL = "claude-sonnet-4-6"
+MODEL_GUIDANCE = (
+    "Use Sonnet (default) for OCR — faithful verbatim + honest [illegible]. "
+    "Escalate the hardest / decisive pages to Opus (via force re-OCR). Do NOT use "
+    "small models (e.g. Haiku) for legal/forensic OCR: they corrupt names and can "
+    "fabricate entire documents — contamination, not merely low quality."
+)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -397,6 +409,7 @@ def request_ocr(
         "page_id": r["page_id"], "doc_id": r["doc_id"], "page_number": pno,
         "prompt": OCR_PROMPT, "agent_type": agent_type,
         "tiles": tiles, "tile_count": len(tiles),
+        "recommended_model": RECOMMENDED_OCR_MODEL, "model_guidance": MODEL_GUIDANCE,
         "already_requested": bool(prior),
     }
     if len(tiles) == 1:
