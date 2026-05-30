@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — leveled review: Finding verification + confidence
+- **Findings are gradeable by independent reviewers (`study("verify",
+  finding_id=…)`).** A cross-chunk Finding now accumulates independent
+  verification votes (reusing the assessment `VerificationEvent` substrate;
+  self-verification rejected). `list_findings` / `get_study` surface a
+  reviewer-agreement rollup computed **on read** — `reviewer_count`, `vote_tally`,
+  `agreement`, `confidence` (= `max(0, net) × provenance factor`), and an
+  `escalation_state` (`settled` / `contested` / `needs_more`) that is also a
+  routing label (`MATCH (f:Finding:Contested)`). Confidence is a function of
+  *recorded votes*, not a single agent's assertion — the substrate the leveled
+  control system is built on.
+
 ### Added — cross-chunk synthesis (honest completeness)
 - **Cross-chunk `Finding` unit (`study("finding"/"findings")`).** A first-class
   reified node asserting a *pattern over a set of chunks* — the unit per-chunk

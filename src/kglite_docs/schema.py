@@ -245,6 +245,19 @@ LABEL_VERIFIED: Final = "Verified"
 LABEL_DISPUTED: Final = "Disputed"
 LABEL_STALE: Final = "Stale"
 
+# Finding escalation state — the aggregate of independent verification votes on a
+# cross-chunk Finding (one-of-N via swap_label): `MATCH (f:Finding:Contested)`.
+# (LABEL_CONTESTED is reused; labels are per-node-type so the Chunk/Finding
+# `Contested` namespaces don't collide.)
+ESCALATION_NEEDS_MORE: Final = "needs_more"   # too few reviewers to be confident
+ESCALATION_SETTLED: Final = "settled"         # reviewers concur
+ESCALATION_CONTESTED: Final = "contested"     # reviewers split
+LABEL_SETTLED: Final = "Settled"
+LABEL_NEEDS_MORE: Final = "NeedsMore"
+VALID_ESCALATION_STATES: Final = frozenset(
+    {ESCALATION_NEEDS_MORE, ESCALATION_SETTLED, ESCALATION_CONTESTED}
+)
+
 # Review ticket + Summary share "NeedsRevision"/"Reviewed" (intentional)
 LABEL_NEW: Final = "New"
 LABEL_IN_REVIEW: Final = "InReview"
@@ -311,6 +324,12 @@ _ASSESSMENT_PROVENANCE_LABELS: Final[dict[str, str]] = {
     PROVENANCE_PRIMARY: LABEL_PRIMARY_TEXT,
     PROVENANCE_CHARACTERIZATION: LABEL_CHARACTERIZATION,
     PROVENANCE_SCANNED_UNREAD: LABEL_SCANNED_UNREAD,
+}
+
+_FINDING_ESCALATION_LABELS: Final[dict[str, str]] = {
+    ESCALATION_NEEDS_MORE: LABEL_NEEDS_MORE,
+    ESCALATION_SETTLED: LABEL_SETTLED,
+    ESCALATION_CONTESTED: LABEL_CONTESTED,
 }
 
 _STUDY_STATUS_LABELS: Final[dict[str, str]] = {
@@ -380,6 +399,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "study.status": _STUDY_STATUS_LABELS,
     "assessment.verification_status": _ASSESSMENT_STATUS_LABELS,
     "assessment.provenance": _ASSESSMENT_PROVENANCE_LABELS,
+    "finding.escalation_state": _FINDING_ESCALATION_LABELS,
 }
 
 

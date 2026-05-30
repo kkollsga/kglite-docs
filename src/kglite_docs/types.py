@@ -514,6 +514,13 @@ class FindingRow(TypedDict, total=False):
     by_agent: str
     verification_status: AssessmentStatus
     supporting: list[dict[str, Any]]  # [{id, doc_id, page}, …]
+    # Reviewer-agreement rollup (computed on read from independent votes).
+    reviewer_count: int
+    vote_tally: dict[str, int]            # {verified, disputed, duplicate}
+    agreement: float                      # top-verdict share, [0,1]
+    confidence: float                     # max(0,net) × provenance factor, [0,1]
+    escalation_state: str                 # settled | contested | needs_more
+    review_events: list[dict[str, Any]]   # [{by, verdict, provenance, notes, at}, …]
 
 
 class ConflictRow(TypedDict, total=False):

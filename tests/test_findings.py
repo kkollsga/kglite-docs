@@ -91,6 +91,50 @@ def test_finding_validation(corpus: Corpus, tmp_path: Path) -> None:
                               stance="against", weight=0.5, agent_id="s")
 
 
+def test_finding_verification_builds_confidence(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    f = corpus.create_finding(sid, statement="unequal", supporting_chunk_ids=[ch[0], ch[2]],
+                              stance="against", weight=0.9, agent_id="synth", provenance="primary_text")
+    fid = f["finding_id"]
+    # A fresh finding is unreviewed → low confidence, needs_more.
+    fresh = corpus.list_findings(sid)[0]
+    assert fresh["reviewer_count"] == 0 and fresh["confidence"] == 0.0
+    assert fresh["escalation_state"] == "needs_more"
+    # Two concurring independent reviewers → settled, confidence rises.
+    corpus.verify_finding(fid, verdict="verified", verifier_agent_id="r1", provenance="primary_text")
+    r2 = corpus.verify_finding(fid, verdict="verified", verifier_agent_id="r2", provenance="primary_text")
+    assert r2["escalation_state"] == "settled" and r2["agreement"] == 1.0 and r2["confidence"] == 1.0
+    row = corpus.list_findings(sid)[0]
+    assert row["reviewer_count"] == 2 and row["vote_tally"]["verified"] == 2
+    assert len(row["review_events"]) == 2
+    # Escalation state is a routing label.
+    assert corpus.cypher("MATCH (f:Finding:Settled) RETURN count(f) AS n").to_list()[0]["n"] == 1
+
+
+def test_finding_dispute_is_contested(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    fid = corpus.create_finding(sid, statement="x", supporting_chunk_ids=[ch[0]],
+                                stance="against", weight=0.8, agent_id="synth")["finding_id"]
+    corpus.verify_finding(fid, verdict="verified", verifier_agent_id="r1")
+    r = corpus.verify_finding(fid, verdict="disputed", verifier_agent_id="r2")
+    assert r["escalation_state"] == "contested"
+    assert corpus.list_findings(sid)[0]["escalation_state"] == "contested"
+
+
+def test_finding_self_verification_rejected(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    fid = corpus.create_finding(sid, statement="x", supporting_chunk_ids=[ch[0]],
+                                stance="against", weight=0.5, agent_id="synth")["finding_id"]
+    from kglite_docs.errors import SelfVerificationError
+    with pytest.raises(SelfVerificationError):
+        corpus.verify_finding(fid, verdict="verified", verifier_agent_id="synth")
+    with pytest.raises(InvalidEnumError):  # finding missing
+        corpus.verify_finding("nope", verdict="verified", verifier_agent_id="r1")
+
+
 def test_delete_study_cascades_findings(corpus: Corpus, tmp_path: Path) -> None:
     ch = _chunks(corpus, tmp_path)
     sid = corpus.define_study("Q", created_by="lead")

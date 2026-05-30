@@ -1336,8 +1336,21 @@ class Corpus:
         self, study_id: str, *, finding_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """Cross-chunk findings for a study (weight-ranked), each with its
-        supporting chunks (id + page). Optional `finding_type` filter."""
+        supporting chunks (id + page) and the reviewer-agreement rollup
+        (reviewer_count / vote_tally / agreement / confidence / escalation_state)."""
         return study_mod.list_findings(self._store, study_id=study_id, finding_type=finding_type)
+
+    def verify_finding(
+        self, finding_id: str, *, verdict: AssessmentVerdict, verifier_agent_id: str,
+        notes: str = "", provenance: Provenance | None = None,
+    ) -> dict[str, Any]:
+        """A second agent grades a cross-chunk Finding (the independent vote
+        confidence is built from). Self-verification is rejected; recomputes the
+        finding's escalation_state from all votes."""
+        return study_mod.verify_finding(
+            self._store, finding_id=finding_id, verdict=verdict,
+            verifier_agent_id=verifier_agent_id, notes=notes, provenance=provenance,
+        )
 
     def next_unassessed(
         self, study_id: str, *,

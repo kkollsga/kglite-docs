@@ -42,10 +42,16 @@ from kglite_docs.schema import (
     CHUNK,
     CHUNK_TEXT_COL,
     CLAIM_TTL_SECONDS,
+    ESCALATION_CONTESTED,
+    ESCALATION_NEEDS_MORE,
+    ESCALATION_SETTLED,
     FINDING,
     HAS_VERIFICATION,
     OF_STUDY,
+    PROVENANCE_CHARACTERIZATION,
     PROVENANCE_DEFAULT,
+    PROVENANCE_PRIMARY,
+    PROVENANCE_SCANNED_UNREAD,
     STANCE_AGAINST,
     STANCE_DEFERRED,
     STANCE_SUPPORTS,
@@ -859,6 +865,7 @@ def create_finding(
     )
     for lbl in (label_for("study.stance", stance),
                 label_for("assessment.provenance", provenance),
+                label_for("finding.escalation_state", ESCALATION_NEEDS_MORE),
                 label_for("finding.type", finding_type) if finding_type else ""):
         if lbl:
             store.add_label(FINDING, [fid], lbl)
@@ -898,8 +905,150 @@ def list_findings(
             params={"fid": r["finding_id"]},
         ))
         r["supporting"] = sup
+        # Reviewer-agreement rollup (R1): computed on read from the independent
+        # verification votes — append-only, never a re-read property.
+        votes = _read_finding_votes(store, r["finding_id"])
+        r.update(_finding_confidence(votes, provenance=r.get("provenance") or PROVENANCE_DEFAULT))
+        r["review_events"] = votes
         out.append(r)
     return out
+
+
+# Reviewer-grade confidence = agreement × provenance factor. Provenance reflects
+# what the verifiers stood on; a 'verified' resting on a characterization is
+# weaker than one resting on primary text. The finding's own probative `weight`
+# is reported separately — confidence grades *reviewer agreement*, not strength.
+_PROV_FACTOR: dict[str, float] = {
+    PROVENANCE_PRIMARY: 1.0,
+    PROVENANCE_CHARACTERIZATION: 0.6,
+    PROVENANCE_SCANNED_UNREAD: 0.3,
+}
+
+
+def _read_finding_votes(store: Store, finding_id: str) -> list[dict[str, Any]]:
+    """The latest verification vote per agent on a finding, newest first."""
+    rows = _df_dicts(store.cypher(
+        "MATCH (f:Finding {id: $fid})-[:HAS_VERIFICATION]->(ev:VerificationEvent) "
+        "RETURN ev.verifier_agent_id AS by, ev.verdict AS verdict, "
+        "ev.provenance AS provenance, ev.notes AS notes, ev.created_at AS at "
+        "ORDER BY ev.created_at DESC",
+        params={"fid": finding_id},
+    ))
+    seen: set[str] = set()
+    latest: list[dict[str, Any]] = []
+    for r in rows:
+        ag = str(r.get("by"))
+        if ag in seen:
+            continue
+        seen.add(ag)
+        latest.append(r)
+    return latest
+
+
+def _finding_confidence(
+    votes: list[dict[str, Any]], *, provenance: str,
+) -> dict[str, Any]:
+    """Aggregate independent votes into reviewer_count / vote_tally / agreement /
+    confidence / escalation_state. `confidence = max(0, net) × provenance_factor`
+    where `net = (verified - disputed) / reviewer_count`."""
+    tally = {"verified": 0, "disputed": 0, "duplicate": 0}
+    for v in votes:
+        verdict = v.get("verdict")
+        if verdict in tally:
+            tally[verdict] += 1
+    reviewer_count = len(votes)
+    agreement = (max(tally.values()) / reviewer_count) if reviewer_count else 0.0
+    net = ((tally["verified"] - tally["disputed"]) / reviewer_count) if reviewer_count else 0.0
+    factor = _PROV_FACTOR.get(provenance, 0.6)
+    confidence = round(max(0.0, net) * factor, 4)
+    if reviewer_count == 0:
+        state = ESCALATION_NEEDS_MORE
+    elif tally["verified"] and tally["disputed"]:
+        state = ESCALATION_CONTESTED
+    elif reviewer_count >= 2 and net >= 0.5:
+        state = ESCALATION_SETTLED
+    else:
+        state = ESCALATION_NEEDS_MORE
+    return {
+        "reviewer_count": reviewer_count,
+        "vote_tally": tally,
+        "agreement": round(agreement, 4),
+        "confidence": confidence,
+        "escalation_state": state,
+    }
+
+
+def verify_finding(
+    store: Store,
+    *,
+    finding_id: str,
+    verdict: str,
+    verifier_agent_id: str,
+    notes: str = "",
+    provenance: str | None = None,
+) -> dict[str, Any]:
+    """A second agent grades a cross-chunk Finding (verified / disputed /
+    duplicate) — the independent vote that confidence is built from (R1).
+    Self-verification is rejected. Recomputes the finding's escalation_state
+    (settled / contested / needs_more) from all votes and swaps its label."""
+    if verdict not in VALID_ASSESSMENT_VERDICTS:
+        raise InvalidEnumError(
+            f"invalid verdict: {verdict!r} (expected one of {sorted(VALID_ASSESSMENT_VERDICTS)})"
+        )
+    if provenance is not None and provenance not in VALID_PROVENANCE:
+        raise InvalidEnumError(
+            f"invalid provenance: {provenance!r} (expected one of {sorted(VALID_PROVENANCE)})"
+        )
+    meta = _df_dicts(store.cypher(
+        "MATCH (a:Agent)-[:AUTHORED]->(f:Finding {id: $id}) "
+        "RETURN a.id AS author, f.provenance AS provenance",
+        params={"id": finding_id},
+    ))
+    if not meta:
+        raise InvalidEnumError(f"finding not found: {finding_id}")
+    if meta[0]["author"] == verifier_agent_id:
+        raise SelfVerificationError(
+            f"agent {verifier_agent_id!r} can't verify finding {finding_id} — they authored it"
+        )
+
+    register_agent(store, agent_id=verifier_agent_id)
+    now = _now()
+    event_id = str(uuid.uuid4())
+    store.upsert_nodes(VERIFICATION_EVENT, [{
+        "id": event_id,
+        "title": f"{verdict} by {verifier_agent_id}",
+        "finding_id": finding_id,
+        "verdict": verdict,
+        "verifier_agent_id": verifier_agent_id,
+        "notes": notes,
+        "provenance": provenance or "",
+        "created_at": now,
+    }])
+    store.upsert_edges(
+        HAS_VERIFICATION, [{"src": finding_id, "dst": event_id}],
+        source_type=FINDING, target_type=VERIFICATION_EVENT,
+    )
+    store.upsert_edges(
+        VERIFIED_BY, [{"src": finding_id, "dst": verifier_agent_id}],
+        source_type=FINDING, target_type=AGENT,
+    )
+    store.upsert_edges(
+        AUTHORED, [{"src": verifier_agent_id, "dst": event_id}],
+        source_type=AGENT, target_type=VERIFICATION_EVENT,
+    )
+    conf = _finding_confidence(
+        _read_finding_votes(store, finding_id),
+        provenance=meta[0].get("provenance") or PROVENANCE_DEFAULT,
+    )
+    store.swap_label(
+        FINDING, [finding_id],
+        add=label_for("finding.escalation_state", conf["escalation_state"]),
+        remove_any_of=labels_for("finding.escalation_state"),
+    )
+    return {
+        "finding_id": finding_id, "status": verdict,
+        "verified_by": verifier_agent_id, "event_id": event_id, **conf,
+    }
 
 
 def next_unassessed(

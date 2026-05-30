@@ -875,6 +875,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         agent_id: str | None = None,
         model: str = "",
         assessment_id: str | None = None,
+        finding_id: str | None = None,
         verdict: str | None = None,
         verifier_agent_id: str | None = None,
         notes: str = "",
@@ -965,13 +966,17 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `rationale`. Findings are a separate collection from the per-chunk
           assessment ledger.
         - **`findings`** — list a study's cross-chunk findings (weight-ranked,
-          each with its supporting chunks). Requires `study_id`; optional
-          `finding_type` filter.
-        - **`verify`** — a second agent checks an assessment. Requires
-          `assessment_id`, `verdict` (`verified`/`disputed`/`duplicate` —
-          `duplicate` = "same as another"), `verifier_agent_id`; optional
-          `provenance` (what the verifier checked, recorded on the event).
-          Server rejects self-verification.
+          each with its supporting chunks **and** the reviewer-agreement rollup:
+          reviewer_count, vote_tally, agreement, confidence, escalation_state).
+          Requires `study_id`; optional `finding_type` filter.
+        - **`verify`** — a second agent grades an assessment **or a finding** —
+          the independent vote confidence is built from. Pass `assessment_id`
+          (per-chunk) **or** `finding_id` (cross-chunk), plus `verdict`
+          (`verified`/`disputed`/`duplicate` — `duplicate` = "same as another")
+          and `verifier_agent_id`; optional `provenance` (what the verifier
+          checked, recorded on the event). Verifying a finding recomputes its
+          escalation_state (settled / contested / needs_more). Self-verification
+          is rejected.
         - **`conclude`** — write the study's conclusion (stored as a
           verifiable summary on the study). Requires `study_id`, `text`,
           `agent_id`; optional `embed`.
@@ -1054,14 +1059,27 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 element=element, include_superseded=include_superseded, limit=limit,
             )
         if action == "verify":
-            r = corpus.verify_assessment(
-                _require(assessment_id, "assessment_id", action, "study"),
-                verdict=_require(verdict, "verdict", action, "study"),
-                verifier_agent_id=_require(
-                    verifier_agent_id, "verifier_agent_id", action, "study",
-                ),
-                notes=notes, provenance=provenance,
-            )
+            # One verb, two targets: a per-chunk Assessment (assessment_id) or a
+            # cross-chunk Finding (finding_id) — the latter is the vote confidence
+            # is built from.
+            if finding_id is not None:
+                r = corpus.verify_finding(
+                    finding_id,
+                    verdict=_require(verdict, "verdict", action, "study"),
+                    verifier_agent_id=_require(
+                        verifier_agent_id, "verifier_agent_id", action, "study",
+                    ),
+                    notes=notes, provenance=provenance,
+                )
+            else:
+                r = corpus.verify_assessment(
+                    _require(assessment_id, "assessment_id", action, "study"),
+                    verdict=_require(verdict, "verdict", action, "study"),
+                    verifier_agent_id=_require(
+                        verifier_agent_id, "verifier_agent_id", action, "study",
+                    ),
+                    notes=notes, provenance=provenance,
+                )
             _persist(corpus)
             return r
         if action == "conclude":
