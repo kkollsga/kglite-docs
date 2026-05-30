@@ -487,6 +487,9 @@ class Corpus:
             RETURN c.id AS id, c.title AS title, c.doc_id AS doc_id,
                    c.page_number AS page, c.chunk_index AS chunk_index,
                    c.{CHUNK_TEXT_COL} AS text, c.token_count AS token_count,
+                   c.word_count AS word_count, c.char_count AS char_count,
+                   c.content_kind AS content_kind, c.quality_score AS quality_score,
+                   c.boilerplate AS boilerplate,
                    c.headings_json AS headings, c.status AS status,
                    c.section_id AS section_id, c.doc_type AS doc_type,
                    c.view_count AS view_count

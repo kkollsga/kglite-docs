@@ -140,6 +140,11 @@ class ChunkDetail(TypedDict, total=False):
     chunk_index: int
     text: str
     token_count: int
+    word_count: int
+    char_count: int
+    content_kind: str
+    quality_score: float
+    boilerplate: bool
     headings: str
     section_id: str
     doc_type: str

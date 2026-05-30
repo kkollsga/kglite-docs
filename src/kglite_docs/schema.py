@@ -94,6 +94,13 @@ CHUNK_STATUS_READY: Final = "ready"
 CHUNK_STATUS_NEEDS_OCR: Final = "needs_ocr"
 CHUNK_STATUS_EMPTY: Final = "empty"
 
+# Chunk content kind — a deterministic triage signal computed at ingest.
+CONTENT_PROSE: Final = "prose"
+CONTENT_TABLE: Final = "table"
+CONTENT_LIST: Final = "list"
+CONTENT_CODE: Final = "code"
+CONTENT_SPARSE: Final = "sparse"
+
 # Chunk embedding lifecycle (independent of status). Embedding is an
 # optional, explicit phase: `ingest` writes ready chunks as pending;
 # `index` flips them to done. Lets non-semantic workflows skip the model.
@@ -175,6 +182,17 @@ LABEL_EMPTY: Final = "Empty"
 LABEL_EMBEDDED: Final = "Embedded"
 LABEL_UNEMBEDDED: Final = "Unembedded"
 
+# Chunk content kind → labels (deterministic triage signal; `MATCH (c:Chunk:Table)`)
+LABEL_PROSE: Final = "Prose"
+LABEL_TABLE: Final = "Table"
+LABEL_LIST_BLOCK: Final = "ListBlock"
+LABEL_CODE: Final = "Code"
+LABEL_SPARSE: Final = "Sparse"
+
+# Independent chunk flags (additive, not part of a one-of-N swap set)
+LABEL_LOW_QUALITY: Final = "LowQuality"   # text looks garbled (bad OCR/encoding)
+LABEL_BOILERPLATE: Final = "Boilerplate"  # repeated header/footer across pages
+
 # Assessment stance → labels (`MATCH (a:Assessment:Supports)`)
 LABEL_SUPPORTS: Final = "Supports"
 LABEL_AGAINST: Final = "Against"
@@ -238,6 +256,14 @@ _CHUNK_STATUS_LABELS: Final[dict[str, str]] = {
 _CHUNK_EMBED_LABELS: Final[dict[str, str]] = {
     CHUNK_EMBED_PENDING: LABEL_UNEMBEDDED,
     CHUNK_EMBED_DONE: LABEL_EMBEDDED,
+}
+
+_CHUNK_CONTENT_KIND_LABELS: Final[dict[str, str]] = {
+    CONTENT_PROSE: LABEL_PROSE,
+    CONTENT_TABLE: LABEL_TABLE,
+    CONTENT_LIST: LABEL_LIST_BLOCK,
+    CONTENT_CODE: LABEL_CODE,
+    CONTENT_SPARSE: LABEL_SPARSE,
 }
 
 _STUDY_STANCE_LABELS: Final[dict[str, str]] = {
@@ -310,6 +336,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "agent.kind": _AGENT_KIND_LABELS,
     "chunk.status": _CHUNK_STATUS_LABELS,
     "chunk.embedding": _CHUNK_EMBED_LABELS,
+    "chunk.content_kind": _CHUNK_CONTENT_KIND_LABELS,
     "summary.verification_status": _SUMMARY_STATUS_LABELS,
     "review.status": _REVIEW_STATUS_LABELS,
     "translation.status": _TRANSLATION_STATUS_LABELS,

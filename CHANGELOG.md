@@ -7,6 +7,21 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — agent assist (pre-enrichment)
+- **Deterministic content signals at ingest (FEAT — agent assist).** Ingest now
+  precomputes cheap, model-free triage signals on every chunk so agents spend
+  tokens on judgment, not mechanical work — and it's never lossy (signals only
+  *label*; no chunk is altered or dropped):
+  - `word_count` / `char_count` (alongside the existing `token_count`).
+  - `content_kind` — `prose` / `table` / `list` / `code` / `sparse` — as both a
+    property and a label predicate (`MATCH (c:Chunk:Table)`), so an agent routes
+    to (or past) tables, lists, and code without reading them.
+  - `quality_score` (0..1) with a `:LowQuality` flag on prose/sparse chunks whose
+    text looks garbled (bad OCR/encoding) — advisory.
+  - `:Boilerplate` on verbatim-duplicate chunks (repeated disclaimers / pages),
+    flagged but kept.
+  All surfaced on `get_chunk()`; backward-compatible (re-ingest to populate).
+
 ## [0.0.10] — 2026-05-30
 
 Release theme: **scale & polish** — single-writer guardrails (advisory lock +

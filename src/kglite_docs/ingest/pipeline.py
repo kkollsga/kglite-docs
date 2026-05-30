@@ -28,11 +28,20 @@ from kglite_docs.schema import (
     HAS_CHUNK,
     HAS_PAGE,
     HAS_SECTION,
+    LABEL_BOILERPLATE,
     LABEL_EMBEDDED,
+    LABEL_LOW_QUALITY,
     NEXT_CHUNK,
     PAGE,
     SECTION,
     label_for,
+)
+from kglite_docs.signals import (
+    LOW_QUALITY_THRESHOLD,
+    char_count,
+    classify_content_kind,
+    text_quality,
+    word_count,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _rows
@@ -209,8 +218,14 @@ def ingest_document(
     chunk_ids_by_page: dict[int, list[str]] = {}
     # Group chunk ids by status so we can add labels in one batch per kind.
     chunk_ids_by_status: dict[str, list[str]] = {}
+    # Deterministic content signals (FEAT: agent assist) — collected per kind so
+    # labels apply in one batch each.
+    content_kind_ids: dict[str, list[str]] = {}
+    low_quality_ids: list[str] = []
     for status, ch, p in all_chunks:
         cid = _chunk_id(doc_id, p.page_number, ch.chunk_index)
+        kind = classify_content_kind(ch.text)
+        quality = text_quality(ch.text)
         chunk_rows.append({
             "id": cid,
             "title": (ch.text[:80] + "…") if ch.text else f"[needs ocr] p.{p.page_number}",
@@ -220,6 +235,11 @@ def ingest_document(
             "chunk_index": ch.chunk_index,
             CHUNK_TEXT_COL: ch.text,
             "token_count": ch.token_count,
+            "word_count": word_count(ch.text),
+            "char_count": char_count(ch.text),
+            "content_kind": kind,
+            "quality_score": quality,
+            "boilerplate": False,               # set below by the cross-page pass
             "headings_json": _safe_json(ch.headings),
             "status": status,                   # property still written
             "embedded": False,                  # flipped by index() / embed=True
@@ -229,6 +249,25 @@ def ingest_document(
         })
         chunk_ids_by_page.setdefault(p.page_number, []).append(cid)
         chunk_ids_by_status.setdefault(status, []).append(cid)
+        if kind:
+            content_kind_ids.setdefault(kind, []).append(cid)
+        if kind in ("prose", "sparse") and quality < LOW_QUALITY_THRESHOLD:
+            low_quality_ids.append(cid)
+
+    # Boilerplate: identical text appearing in ≥2 chunks is a repeated
+    # header/footer (across pages in a PDF, or duplicated in any format) — flag
+    # it (advisory; the chunk is kept, never dropped).
+    rows_by_hash: dict[str, list[dict[str, object]]] = {}
+    for r in chunk_rows:
+        h = str(r.get("text_hash") or "")
+        if h:
+            rows_by_hash.setdefault(h, []).append(r)
+    boilerplate_ids: list[str] = []
+    for dupes in rows_by_hash.values():
+        if len(dupes) >= 2:
+            for r in dupes:
+                r["boilerplate"] = True
+                boilerplate_ids.append(str(r["id"]))
 
     # Derive Sections (the middle grain between document and chunk) and stamp
     # each chunk with its section_id/doc_type *before* the upsert.
@@ -247,6 +286,17 @@ def ingest_document(
         status_label = label_for("chunk.status", status)
         if status_label:
             store.add_label(CHUNK, ids, status_label)
+
+    # Content-signal labels (additive triage predicates): content_kind +
+    # LowQuality + Boilerplate.
+    for kind, ids in content_kind_ids.items():
+        kind_label = label_for("chunk.content_kind", kind)
+        if kind_label:
+            store.add_label(CHUNK, ids, kind_label)
+    if low_quality_ids:
+        store.add_label(CHUNK, low_quality_ids, LABEL_LOW_QUALITY)
+    if boilerplate_ids:
+        store.add_label(CHUNK, boilerplate_ids, LABEL_BOILERPLATE)
 
     # Embedding lifecycle is tracked by the boolean `c.embedded` property
     # (set False above). The work-list is "ready chunks where embedded =
