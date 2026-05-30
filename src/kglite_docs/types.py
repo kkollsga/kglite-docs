@@ -256,6 +256,9 @@ class CorpusStatus(TypedDict):
     unembedded: int
     image_pages: int
     pending_ocr: int
+    classified: int
+    unclassified: int
+    contested: int
     studies: int
 
 
@@ -272,6 +275,10 @@ class TriageMap(TypedDict, total=False):
     boilerplate: int
     low_quality: int
     entities: dict[str, int]
+    classified: int
+    unclassified: int
+    contested: int
+    elements: dict[str, int]
     summary: str
 
 
@@ -490,6 +497,7 @@ class Ledger(TypedDict, total=False):
     total: int
     returned: int
     tallies: dict[str, Any]
+    scope_coverage: dict[str, int]  # present only when `element=` scoped
 
 
 class ConflictRow(TypedDict, total=False):

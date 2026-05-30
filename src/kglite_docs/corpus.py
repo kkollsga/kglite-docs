@@ -867,9 +867,26 @@ class Corpus:
     def triage_map(self, *, doc_id: str | None = None) -> TriageMap:
         """One cheap call that aggregates the deterministic content signals — the
         content_kind breakdown, boilerplate / low-quality counts, structured-
-        entity coverage, embedding state, OCR-pending pages — so an agent orients
-        without reading the corpus. Scope with `doc_id`."""
+        entity coverage, element-classification coverage, embedding state,
+        OCR-pending pages — so an agent orients without reading the corpus. Scope
+        with `doc_id`."""
         return cast(TriageMap, coverage_mod.triage_map(self._store, doc_id=doc_id))
+
+    def element_coverage(
+        self, element: str, *, doc_id: str | None = None, section_id: str | None = None,
+    ) -> dict[str, Any]:
+        """How an `element=` scope partitions the ready chunks (`in_scope`,
+        `excluded_other_element`, `excluded_unclassified`, `ready_total`), with
+        `in_scope + excluded_total == ready_total`. The honest-coverage block a
+        scoped `study_ledger` also embeds; unknown element raises."""
+        return coverage_mod.element_scope_coverage(
+            self._store, element=element, doc_id=doc_id, section_id=section_id,
+        )
+
+    def element_consistency(self) -> dict[str, Any]:
+        """Audit element labels vs the canonical `element_types_json`
+        (`{checked, inconsistent, sample}`) — surfaces any label/property drift."""
+        return coverage_mod.element_consistency(self._store)
 
     # ─── ocr ──────────────────────────────────────────────────────────────
 

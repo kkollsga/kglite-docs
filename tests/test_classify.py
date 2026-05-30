@@ -126,6 +126,48 @@ def test_ledger_element_rank_first(corpus: Corpus, tmp_path: Path) -> None:
     assert led["rows"][0]["chunk_id"] == ch[1]   # in-scope element first despite lower weight
 
 
+def test_scope_coverage_reconciles_and_ledger_embeds_it(corpus: Corpus, tmp_path: Path) -> None:
+    """Phase 5: the honest-coverage block reconciles to the ready universe and
+    rides on a scoped ledger."""
+    ch = _ingest(corpus, tmp_path, n=5)
+    classify.classify_chunk(corpus.store, chunk_id=ch[0], elements=["alpha"], agent_id="cl")
+    classify.classify_chunk(corpus.store, chunk_id=ch[1], elements=["alpha"], agent_id="cl")
+    classify.classify_chunk(corpus.store, chunk_id=ch[2], elements=["beta"], agent_id="cl")  # other element
+    classify.classify_chunk(corpus.store, chunk_id=ch[3], elements=[], agent_id="cl")        # unclassified
+    # ch[4] left not-yet-classified
+
+    sc = corpus.element_coverage("alpha")
+    assert sc["in_scope"] == 2
+    assert sc["excluded_other_element"] == 1            # the :Beta chunk
+    assert sc["excluded_unclassified"] == 2             # unclassified + not-yet
+    assert sc["in_scope"] + sc["excluded_total"] == sc["ready_total"] == 5  # the invariant
+
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.5, agent_id="a1")
+    led = corpus.study_ledger(sid, element="alpha")
+    assert led["scope_coverage"]["in_scope"] == 2      # mandatory block present
+    # An unscoped ledger has no scope_coverage block.
+    assert "scope_coverage" not in corpus.study_ledger(sid)
+
+
+def test_triage_map_and_status_show_element_coverage(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest(corpus, tmp_path, n=3)
+    classify.classify_chunk(corpus.store, chunk_id=ch[0], elements=["alpha"], agent_id="cl")
+    classify.classify_chunk(corpus.store, chunk_id=ch[1], elements=[], agent_id="cl")  # unclassified
+    m = corpus.triage_map()
+    assert m["classified"] == 1 and m["unclassified"] == 1
+    assert m["elements"].get("alpha", 0) == 1
+    s = corpus.status()
+    assert s["classified"] == 1 and s["unclassified"] == 1 and s["contested"] == 0
+
+
+def test_element_consistency_clean(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest(corpus, tmp_path, n=2)
+    classify.classify_chunk(corpus.store, chunk_id=ch[0], elements=["alpha", "beta"], agent_id="cl")
+    c = corpus.element_consistency()
+    assert c["inconsistent"] == 0 and c["checked"] >= 1
+
+
 def test_classify_many(corpus: Corpus, tmp_path: Path) -> None:
     ch = _ingest(corpus, tmp_path)
     res = classify.classify_many(corpus.store, items=[

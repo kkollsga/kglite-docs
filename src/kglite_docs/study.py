@@ -695,7 +695,7 @@ def ledger(
         ctx_map = {r["aid"]: r["ctx_ids"] for r in ctx_rows}
         for r in rows:
             r["context_chunk_ids"] = ctx_map.get(r["assessment_id"], [])
-    return {
+    out: dict[str, Any] = {
         "study_id": study_id,
         "question": meta[0]["question"],
         "status": meta[0]["status"],
@@ -704,6 +704,14 @@ def ledger(
         "returned": len(rows),
         "tallies": _tallies(store, study_id),
     }
+    if element:
+        # Mandatory honest-coverage block: what the advisory element scope
+        # deprioritized (reconciles to the ready universe).
+        from kglite_docs.coverage import element_scope_coverage
+        out["scope_coverage"] = element_scope_coverage(
+            store, element=element, doc_id=doc_id, section_id=section_id,
+        )
+    return out
 
 
 def conflicts(store: Store, *, study_id: str) -> dict[str, Any]:

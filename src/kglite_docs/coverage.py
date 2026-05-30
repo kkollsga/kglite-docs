@@ -9,15 +9,22 @@ is invisible — see `ROADMAP.md`.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from kglite_docs.errors import InvalidEnumError
 from kglite_docs.ingest.parser import OCR_TEXT_THRESHOLD
 from kglite_docs.schema import (
     ENTITY_LABELS,
     LABEL_BOILERPLATE,
+    LABEL_CLASSIFIED,
+    LABEL_CONTESTED,
     LABEL_EMBEDDED,
     LABEL_LOW_QUALITY,
     LABEL_READY,
+    LABEL_UNCLASSIFIED,
+    element_label,
+    valid_element_values,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts
@@ -115,6 +122,11 @@ def corpus_status(store: Store) -> dict[str, Any]:
         "pending_ocr": _count(
             store, "MATCH (p:Page) WHERE p.needs_ocr = true RETURN count(p) AS n"
         ),
+        # Element classification state — a non-zero `unclassified` is a standing
+        # signal that element-scoped studies have a blind spot.
+        "classified": _count(store, "MATCH (c:Chunk:Ready:Classified) RETURN count(c) AS n"),
+        "unclassified": _count(store, "MATCH (c:Chunk:Ready:Unclassified) RETURN count(c) AS n"),
+        "contested": _count(store, "MATCH (c:Chunk:Ready:Contested) RETURN count(c) AS n"),
         "studies": _count(store, "MATCH (s:Study) RETURN count(s) AS n"),
     }
 
@@ -157,14 +169,23 @@ def triage_map(store: Store, *, doc_id: str | None = None) -> dict[str, Any]:
         store, f"MATCH (s:Section) {('WHERE s.doc_id = $d ' if doc_id else '')}RETURN count(s) AS n",
         params,
     )
+    # Element classification coverage (per registered element type, ready chunks).
+    classified = lcount(LABEL_CLASSIFIED)
+    unclassified = lcount(LABEL_UNCLASSIFIED)
+    contested = lcount(LABEL_CONTESTED)
+    elements = {v: lcount(lbl) for v in valid_element_values() if (lbl := element_label(v))}
+    elements = {k: v for k, v in sorted(elements.items(), key=lambda kv: -kv[1]) if v}
 
     top = ", ".join(f"{n} {k}" for k, n in sorted(content_kinds.items(), key=lambda kv: -kv[1]))
     ent = ", ".join(f"{n} {k}" for k, n in entities.items())
+    el = ", ".join(f"{n} {k}" for k, n in elements.items())
     summary = (
         f"{total} chunks ({ready} ready, {embedded} embedded); kinds: {top or 'n/a'}; "
         f"{boilerplate} boilerplate, {low_quality} low-quality; "
         f"{pending_ocr} page(s) need OCR"
         + (f"; entities: {ent}" if ent else "")
+        + (f"; elements: {el}" if el else "")
+        + (f"; {unclassified} unclassified, {contested} contested" if (classified or unclassified) else "")
     )
     return {
         "chunks": total,
@@ -177,5 +198,75 @@ def triage_map(store: Store, *, doc_id: str | None = None) -> dict[str, Any]:
         "boilerplate": boilerplate,
         "low_quality": low_quality,
         "entities": entities,
+        "classified": classified,
+        "unclassified": unclassified,
+        "contested": contested,
+        "elements": elements,
         "summary": summary,
     }
+
+
+def element_scope_coverage(
+    store: Store, *, element: str, doc_id: str | None = None, section_id: str | None = None,
+) -> dict[str, Any]:
+    """How an `element=` scope partitions the ready chunks — the non-lossy block
+    attached to a scoped `study_ledger`. Reconciles: `in_scope + excluded_total
+    == ready_total`. A non-zero `excluded_unclassified` is a loud signal that the
+    scope's universe has un-routed chunks (its blind spot). Unknown element raises."""
+    lbl = element_label(element)
+    if lbl is None:
+        raise InvalidEnumError(
+            f"unknown element {element!r} — not in the registered schema "
+            f"({sorted(valid_element_values())})"
+        )
+    preds = []
+    params: dict[str, Any] = {}
+    if doc_id:
+        preds.append("c.doc_id = $d")
+        params["d"] = doc_id
+    if section_id:
+        preds.append("c.section_id = $s")
+        params["s"] = section_id
+    where = ("WHERE " + " AND ".join(preds) + " ") if preds else ""
+
+    def c(extra_label: str = "") -> int:
+        return _count(store, f"MATCH (c:Chunk:{LABEL_READY}{extra_label}) {where}RETURN count(c) AS n", params)
+
+    ready = c()
+    in_scope = c(f":{lbl}")
+    classified = c(f":{LABEL_CLASSIFIED}")
+    unclassified = c(f":{LABEL_UNCLASSIFIED}")
+    excluded_other_element = classified - in_scope          # classified, but not this element
+    excluded_unclassified = (ready - classified - unclassified) + unclassified  # not-yet + unclassified
+    excluded_total = excluded_other_element + excluded_unclassified
+    return {
+        "element": element,
+        "in_scope": in_scope,
+        "excluded_other_element": excluded_other_element,
+        "excluded_unclassified": excluded_unclassified,
+        "excluded_total": excluded_total,
+        "ready_total": ready,
+    }
+
+
+def element_consistency(store: Store) -> dict[str, Any]:
+    """Audit the two-sources-of-truth invariant: a chunk's element *labels* must
+    match the element set derived from its canonical `element_types_json`. Returns
+    `{checked, inconsistent, sample}` — drift (e.g. from a reclassification that
+    dropped a type) is observable, never silent."""
+    rows = _df_dicts(store.cypher(
+        "MATCH (c:Chunk) WHERE c.element_types_json IS NOT NULL "
+        "RETURN c.id AS id, c.element_types_json AS j, labels(c) AS labels"
+    ))
+    valid_labels = {lbl for v in valid_element_values() if (lbl := element_label(v))}
+    inconsistent: list[str] = []
+    for r in rows:
+        try:
+            recs = json.loads(r.get("j") or "[]")
+        except (TypeError, ValueError):
+            recs = []
+        derived = {element_label(rec["type"]) for rec in recs if rec.get("type") and element_label(rec.get("type"))}
+        on_node = {lbl for lbl in (r.get("labels") or []) if lbl in valid_labels}
+        if derived != on_node:
+            inconsistent.append(str(r["id"]))
+    return {"checked": len(rows), "inconsistent": len(inconsistent), "sample": inconsistent[:20]}

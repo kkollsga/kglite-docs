@@ -50,6 +50,17 @@ breaking changes (called out below).
   `doc_id`/`section_id`). An unknown/unregistered `element=` **raises**
   (`InvalidEnumError`) rather than silently matching zero chunks. (Hard-exclude is
   a deferred, audit-gated follow-up.)
+- **Honest-coverage surfacing for element scoping.** A scoped `study_ledger`
+  (`element=`) now carries a mandatory **`scope_coverage`** block
+  (`in_scope`/`excluded_other_element`/`excluded_unclassified`/`excluded_total`/
+  `ready_total`) with the enforced invariant `in_scope + excluded_total ==
+  ready_total` — so an early stop on a scoped study is an *informed* choice, and a
+  non-zero `excluded_unclassified` is a standing signal that the scope has a blind
+  spot. Also exposed as `Corpus.element_coverage(element)`. `document("map")` /
+  `triage_map` gains an `elements` breakdown + `classified`/`unclassified`/
+  `contested` counts; `status()` gains the same three. `Corpus.element_consistency()`
+  audits the element labels against the canonical `element_types_json` (drift is
+  observable, never silent).
 
 ## [0.0.11] — 2026-05-30
 

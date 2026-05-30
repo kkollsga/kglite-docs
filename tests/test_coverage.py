@@ -58,7 +58,8 @@ def test_status_snapshot(corpus: Corpus, tmp_path: Path) -> None:
     s = corpus.status()
     assert set(s) == {
         "docs", "pages", "chunks", "embedded", "unembedded",
-        "image_pages", "pending_ocr", "studies",
+        "image_pages", "pending_ocr", "classified", "unclassified", "contested",
+        "studies",
     }
     assert s["docs"] == 2
     assert s["image_pages"] >= 1
