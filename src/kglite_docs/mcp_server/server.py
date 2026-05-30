@@ -38,7 +38,8 @@ standalone functions.
   study(action, ...)      define | assess | next | ledger | verify |
                           conclude | get | list | reopen | delete
   summary(action, ...)    add | verify | list | ground | claim | consensus
-  tag(action, ...)        add | remove | list | chunks
+  tag(action, ...)        add | remove | list | chunks |
+                          unclassified | classify | classify_many
   agent(action, ...)      upsert | get | list | activity
   review(action, ...)     enqueue | enqueue_chunks | claim_next | claim |
                           unclaim | complete | list | get | stats
@@ -114,6 +115,20 @@ embeddings; iterate chunks via study("next"), so you can skip index):
   5. study("conclude", study_id=sid, text="...", agent_id="lead")
   Manage studies with study("list") / get / reopen / delete.
 
+MANY STUDIES ON ONE BIG CORPUS? CLASSIFY ONCE, ROUTE MANY. Re-reading a
+1000-page case for every study is wasteful. Classify each chunk once into a
+domain element schema (a legal pack is loaded by default), then scope studies
+to the relevant element:
+  1. for ch in tag("unclassified", agent_id="cls-1"):
+        tag("classify", chunk_id=ch["id"], elements=[...], agent_id="cls-1")
+        — element ids from the schema (legal: holding, judge_remark, settlement,
+          testimony, statute, …). Empty elements = "no element applies".
+  2. document("map")   — see the element breakdown + how many are unclassified.
+  3. study("next", study_id=sid, element="judge_remark")   — reads judge-remark
+        chunks FIRST (advisory: full list still returned, nothing hidden).
+     study("ledger", study_id=sid, element="judge_remark") — carries a
+        `scope_coverage` block (in_scope vs excluded) so an early stop is informed.
+
 LOADABLE METHODOLOGY (load via MCP prompts):
   /00-start-here          — overview, this doc but expanded.
   /analyze-documents      — given N docs + a task, the canonical pipeline.
@@ -126,13 +141,26 @@ your writes attribute to one Agent node, queryable via
 """
 
 
-def build_app(corpus: Any, *, warm_embedder: bool = True) -> Any:
+def build_app(
+    corpus: Any, *, warm_embedder: bool = True,
+    schema_packs: tuple[str, ...] = ("legal",),
+) -> Any:
     """Construct and return a FastMCP app wired to `corpus`.
 
     `warm_embedder` (default True) kicks off a background load of the
     bge-m3 ONNX session so the first `document('index')` / `search` is
     warm. Set False for pure non-embedding deployments to avoid loading
-    ~2 GB that will never be used."""
+    ~2 GB that will never be used.
+
+    `schema_packs` (default the bundled legal vocabulary) are domain element
+    schemas to register at startup, so `tag('classify')` / `study(element=…)`
+    know the vocabulary. Pass `()` for a domain-agnostic server."""
+    for pack in schema_packs:
+        try:
+            from kglite_docs.schemas import load_schema
+            load_schema(pack)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("could not load schema pack %r: %s", pack, exc)
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as e:  # pragma: no cover - extras gate

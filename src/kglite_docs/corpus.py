@@ -14,6 +14,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, cast
 
+from kglite_docs import classify as classify_mod
 from kglite_docs import cluster as cluster_mod
 from kglite_docs import context as context_mod
 from kglite_docs import coverage as coverage_mod
@@ -887,6 +888,39 @@ class Corpus:
         """Audit element labels vs the canonical `element_types_json`
         (`{checked, inconsistent, sample}`) — surfaces any label/property drift."""
         return coverage_mod.element_consistency(self._store)
+
+    # ─── classification (multi-study routing) ──────────────────────────────
+
+    def next_unclassified(
+        self, *, doc_id: str | None = None, section_id: str | None = None,
+        agent_id: str | None = None, limit: int = 20, ttl_seconds: int = 1800,
+    ) -> list[dict[str, Any]]:
+        """Ready chunks not yet classified, in reading order. With ``agent_id``
+        atomically *claims* them (punchcard, disjoint from study claims); without
+        it, a read-only preview. Classify once, then route many studies by
+        ``element=``."""
+        return classify_mod.next_unclassified(
+            self._store, doc_id=doc_id, section_id=section_id,
+            agent_id=agent_id, limit=limit, ttl_seconds=ttl_seconds,
+        )
+
+    def classify_chunk(
+        self, chunk_id: str, *, elements: list[str], agent_id: str,
+        model: str = "", confidence: float | None = None,
+    ) -> dict[str, Any]:
+        """Classify a chunk into zero or more registered element types (load a
+        schema pack first, e.g. ``schemas.load_schema('legal')``). Empty
+        ``elements`` = a deliberate "no element applies" → `:Unclassified`.
+        Add-only labels (recall-safe); a divergent second agent adds `:Contested`."""
+        return classify_mod.classify_chunk(
+            self._store, chunk_id=chunk_id, elements=elements,
+            agent_id=agent_id, model=model, confidence=confidence,
+        )
+
+    def classify_many(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Batch-classify many chunks. Each item: `{chunk_id, elements, agent_id}`
+        (+ optional `model`, `confidence`)."""
+        return classify_mod.classify_many(self._store, items=items)
 
     # ─── ocr ──────────────────────────────────────────────────────────────
 

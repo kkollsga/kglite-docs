@@ -61,6 +61,13 @@ breaking changes (called out below).
   `contested` counts; `status()` gains the same three. `Corpus.element_consistency()`
   audits the element labels against the canonical `element_types_json` (drift is
   observable, never silent).
+- **MCP surface for classification (zero new nouns).** Folded into the `tag` noun:
+  `tag("unclassified", …)` (punchcard work-list), `tag("classify", chunk_id,
+  elements=[…], agent_id)`, `tag("classify_many", items=[…])`. The `study` noun's
+  `next`/`ledger` gain an `element=` param (advisory rank + the `scope_coverage`
+  block). The MCP server loads the bundled `legal` schema pack by default
+  (`build_app(schema_packs=…)`), and `_INSTRUCTIONS` documents the "classify once
+  → route many studies by element" happy path.
 
 ## [0.0.11] — 2026-05-30
 

@@ -346,3 +346,35 @@ def test_mcp_summary_write_verify_ground(corpus: Corpus, tmp_path: Path) -> None
         "verdict": "verified", "verifier_agent_id": "reviewer",
     })
     assert v["status"] == "verified"
+
+
+@pytest.mark.mcp
+def test_mcp_classify_and_element_scoped_study(corpus: Corpus, tmp_path: Path) -> None:
+    """The classify surface + element-scoped study, end-to-end through the app
+    (build_app loads the legal pack by default)."""
+    from kglite_docs.mcp_server.server import build_app
+    app = build_app(corpus)  # registers the legal schema pack
+
+    md = tmp_path / "case.md"
+    md.write_text(
+        "# Order\n\nThe court holds the motion granted; judgment is entered.\n\n"
+        "# Aside\n\nThe judge remarked that counsel was, frankly, exasperating.\n",
+        encoding="utf-8",
+    )
+    _call(app, "document", {"action": "ingest", "path": str(md), "structure_aware": True})
+    work = _call(app, "tag", {"action": "unclassified", "agent_id": "cls-1", "limit": 50}, as_list=True)
+    assert len(work) >= 2
+    by_text = {("remark" in w["text"].lower()): w["id"] for w in work}
+    _call(app, "tag", {"action": "classify", "chunk_id": by_text[True],
+                       "elements": ["judge_remark"], "agent_id": "cls-1"})
+    _call(app, "tag", {"action": "classify", "chunk_id": by_text[False],
+                       "elements": ["holding", "disposition_order"], "agent_id": "cls-1"})
+
+    m = _call(app, "document", {"action": "map"})
+    assert m["elements"].get("judge_remark", 0) == 1 and m["classified"] == 2
+
+    sid = _call(app, "study", {"action": "define", "question": "strange remarks", "agent_id": "lead"})
+    nxt = _call(app, "study", {"action": "next", "study_id": sid, "element": "judge_remark"}, as_list=True)
+    assert nxt[0]["id"] == by_text[True]            # judge-remark chunk floats first
+    led = _call(app, "study", {"action": "ledger", "study_id": sid, "element": "judge_remark"})
+    assert led["scope_coverage"]["in_scope"] == 1   # honest-coverage block present

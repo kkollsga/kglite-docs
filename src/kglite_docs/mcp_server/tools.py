@@ -430,9 +430,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         kind: str = "custom",
         confidence: float | None = None,
         doc_id: str | None = None,
+        section_id: str | None = None,
+        elements: list[str] | None = None,
+        items: list[dict[str, Any]] | None = None,
+        model: str = "",
         limit: int = 100,
     ) -> Any:
-        """Tag operations on chunks.
+        """Tag + element-classification operations on chunks.
 
         Actions:
 
@@ -446,13 +450,46 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         - **`chunks`** — find all chunks carrying a given tag. Requires
           `name`; optional `limit`.
 
+        Element classification (multi-study routing — classify a corpus ONCE so
+        many studies route to their chunks via `study(..., element=…)` instead of
+        re-scanning; a schema pack must be loaded server-side, e.g. legal):
+        - **`unclassified`** — pull the next ready-but-unclassified chunks (claim
+          them with `agent_id`, like `study("next")`). Optional `doc_id`,
+          `section_id`, `limit`.
+        - **`classify`** — record one chunk's element types. Requires `chunk_id`,
+          `elements` (a list of registered element ids, e.g. `["holding"]`),
+          `agent_id`; optional `model`, `confidence`. Empty `elements` = "no
+          element applies" → marks it unclassified-but-covered. Unknown element
+          ids are rejected.
+        - **`classify_many`** — batch: `items=[{chunk_id, elements, agent_id}, …]`.
+
         Examples::
 
             tag("add", chunk_id="doc_a#p1#c0", name="dense-retrieval",
                 agent_id="me", kind="topic")
-            tag("chunks", name="dense-retrieval")
-            tag("list", doc_id="doc_a", kind="review")
+            for ch in tag("unclassified", agent_id="cls-1"):
+                tag("classify", chunk_id=ch["id"], elements=["holding"], agent_id="cls-1")
         """
+        if action == "unclassified":
+            r = corpus.next_unclassified(
+                doc_id=doc_id, section_id=section_id, agent_id=agent_id, limit=limit,
+            )
+            if agent_id:  # claiming mutates (writes a checkout) → persist
+                _persist(corpus)
+            return r
+        if action == "classify":
+            r = corpus.classify_chunk(
+                _require(chunk_id, "chunk_id", action, "tag"),
+                elements=_require(elements, "elements", action, "tag"),
+                agent_id=_require(agent_id, "agent_id", action, "tag"),
+                model=model, confidence=confidence,
+            )
+            _persist(corpus)
+            return r
+        if action == "classify_many":
+            r = corpus.classify_many(_require(items, "items", action, "tag"))
+            _persist(corpus)
+            return r
         if action == "add":
             return corpus.tag_chunk(
                 _require(chunk_id, "chunk_id", action, "tag"),
@@ -477,7 +514,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 _require(name, "name", action, "tag"), limit=limit,
             )
         raise ValueError(
-            f"tag(): unknown action {action!r}. Valid: add, remove, list, chunks",
+            f"tag(): unknown action {action!r}. Valid: add, remove, list, chunks, "
+            "unclassified, classify, classify_many",
         )
 
     # ─── agent ────────────────────────────────────────────────────────────
@@ -843,6 +881,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         text: str | None = None,
         doc_id: str | None = None,
         section_id: str | None = None,
+        element: str | None = None,
         min_weight: float | None = None,
         verified_only: bool = False,
         include_superseded: bool = False,
@@ -897,13 +936,17 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           (~30 min) and assessing releases. Without `agent_id` it's a
           read-only preview. Requires `study_id`; optional `doc_id`,
           `section_id` (scope to one section — see `document("sections")`),
-          `limit`. For a fan-out, give each analyst the same `study_id` and its
-          own `agent_id` and they'll get disjoint batches.
+          `element` (advisory: float chunks classified as that element type to
+          the front — read your subset first without re-scanning; the full list
+          is still returned, nothing hidden), `limit`. For a fan-out, give each
+          analyst the same `study_id` and its own `agent_id` for disjoint batches.
         - **`ledger`** — weight-ranked evidence + support/against tallies.
           Requires `study_id`; optional `stance` (→ just the supporting or
           contradicting side), `min_weight`, `verified_only`, `doc_id` (scope to
-          one document), `section_id` (scope to one section),
-          `include_superseded` (default false — corrected
+          one document), `section_id` (scope to one section), `element` (advisory:
+          float that element's rows first + attach a `scope_coverage` block
+          showing what was deprioritized), `include_superseded` (default false —
+          corrected
           assessments are hidden; pass true for the full history), `limit`.
           Reports `total`/`returned` so truncation is visible (`total > returned`
           ⇒ raise `limit` to see the rest).
@@ -984,7 +1027,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         if action == "next":
             r = corpus.next_unassessed(
                 _require(study_id, "study_id", action, "study"),
-                doc_id=doc_id, section_id=section_id, agent_id=agent_id, limit=limit,
+                doc_id=doc_id, section_id=section_id, element=element,
+                agent_id=agent_id, limit=limit,
             )
             if agent_id:  # claiming next mutates (writes a checkout) → persist
                 _persist(corpus)
@@ -994,7 +1038,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 _require(study_id, "study_id", action, "study"),
                 stance=stance, min_weight=min_weight,
                 verified_only=verified_only, doc_id=doc_id, section_id=section_id,
-                include_superseded=include_superseded, limit=limit,
+                element=element, include_superseded=include_superseded, limit=limit,
             )
         if action == "verify":
             r = corpus.verify_assessment(
