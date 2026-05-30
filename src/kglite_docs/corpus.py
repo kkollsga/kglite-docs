@@ -186,6 +186,7 @@ class Corpus:
         format: str | None = None,
         embed: bool = False,
         structure_aware: bool = False,
+        context_summary: str = "",
     ) -> IngestResult:
         """Ingest a document. Three modes:
 
@@ -206,6 +207,12 @@ class Corpus:
         With ``structure_aware=True`` chunking starts a fresh chunk at every
         top-level heading (never packing or overlapping across one) — cleaner
         Section boundaries and pinpoint cites; the default packs greedily.
+
+        ``context_summary`` (opt-in) is a document-level blurb prepended to each
+        chunk *before embedding* so the vector carries global context (mitigates
+        cross-document speaker/source confusion); the stored chunk text is
+        unchanged. You supply the summary (e.g. from an LLM pass) — none is
+        generated here.
 
         Returns an :class:`IngestResult` with the assigned ``doc_id``
         (sha256 of file or text bytes), chunk count, OCR-pending page
@@ -234,7 +241,7 @@ class Corpus:
                     self._store, self._embedder, tmp_path,
                     title=title, source_uri=source_uri or "",
                     metadata=metadata, format=fmt, embed=embed,
-                    structure_aware=structure_aware,
+                    structure_aware=structure_aware, context_summary=context_summary,
                 )
             finally:
                 tmp_path.unlink(missing_ok=True)
@@ -242,6 +249,7 @@ class Corpus:
             self._store, self._embedder, path,  # type: ignore[arg-type]
             title=title, source_uri=source_uri, metadata=metadata,
             format=format, embed=embed, structure_aware=structure_aware,
+            context_summary=context_summary,
         )
 
     def ingest_dir(
@@ -352,9 +360,11 @@ class Corpus:
         if doc_id:
             preds.append("c.doc_id = $doc_id")
             params["doc_id"] = doc_id
+        # Join the Document (one per chunk via HAS_CHUNK) for its optional
+        # embed_context (FEAT-11) — prepended to the embed input below.
         q = (
-            "MATCH (c:Chunk:Ready) WHERE " + " AND ".join(preds)
-            + f" RETURN c.id AS id, c.{CHUNK_TEXT_COL} AS text"
+            "MATCH (d:Document)-[:HAS_CHUNK]->(c:Chunk:Ready) WHERE " + " AND ".join(preds)
+            + f" RETURN c.id AS id, c.{CHUNK_TEXT_COL} AS text, d.embed_context AS embed_context"
         )
         pending = [r for r in _df_to_dicts(self._store.cypher(q, params=params)) if r.get("text")]
         if not pending:
@@ -371,7 +381,7 @@ class Corpus:
         for i in range(0, len(pending), batch_size):
             batch = pending[i : i + batch_size]
             ids = [r["id"] for r in batch]
-            vecs = self._embedder.embed([r["text"] for r in batch])
+            vecs = self._embedder.embed([_embed_input(r) for r in batch])
             all_vecs.update(zip(ids, vecs, strict=False))
             # Stop once the wall-clock budget is spent (checked after each
             # batch, so a call overshoots by at most one batch).
@@ -1267,3 +1277,11 @@ class Corpus:
 
 
 from kglite_docs.store import rows as _df_to_dicts  # noqa: E402
+
+
+def _embed_input(row: dict[str, Any]) -> str:
+    """Text to embed for a chunk — prepends the document's `embed_context`
+    (FEAT-11 summary-augmented chunking) when present, else the chunk text."""
+    text = row["text"]
+    ctx = row.get("embed_context")
+    return f"{ctx}\n\n{text}" if ctx else text

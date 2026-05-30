@@ -48,6 +48,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         recursive: bool = True,
         embed: bool = False,
         structure_aware: bool = False,
+        context_summary: str = "",
         batch_size: int = 64,
         filters: dict[str, Any] | None = None,
         limit: int = 100,
@@ -75,6 +76,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `embed=True` to embed inline in one shot. Idempotent on sha256.
           Pass `structure_aware=True` to start a fresh chunk at every
           top-level heading (cleaner section boundaries; default packs greedily).
+          Pass `context_summary="..."` (single file / text mode) to prepend a
+          doc-level blurb to each chunk *before embedding* — the vector carries
+          global context (less cross-doc source confusion); stored text is
+          unchanged. You provide the summary; none is generated here.
         - **`index`** — embed ready-but-unembedded chunks so `search`
           works. Run after `ingest` (the two-phase flow). **Bounded per
           call** (≈30s wall-clock budget) so a big corpus never blocks
@@ -150,12 +155,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                     )
                 r = corpus.ingest(
                     text=text, title=title, format=format or "md", embed=embed,
-                    structure_aware=structure_aware,
+                    structure_aware=structure_aware, context_summary=context_summary,
                 )
             else:
                 r = corpus.ingest(
                     path, title=title, format=format, source_uri=source_uri,
                     embed=embed, structure_aware=structure_aware,
+                    context_summary=context_summary,
                 )
             _persist(corpus)
             res = {

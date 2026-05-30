@@ -103,6 +103,7 @@ def ingest_document(
     format: str | None = None,
     embed: bool = False,
     structure_aware: bool = False,
+    context_summary: str = "",
 ) -> IngestResult:
     """Ingest any supported document format (PDF, DOCX, PPTX, MD, HTML,
     TXT, images). Format is auto-detected from the extension; pass
@@ -153,6 +154,9 @@ def ingest_document(
             "format": fmt,
             "byte_size": byte_size,
             "metadata_json": _safe_json(metadata or {}),
+            # FEAT-11: a doc-level summary prepended to each chunk *before*
+            # embedding (vector carries global context; stored text stays clean).
+            "embed_context": context_summary,
         }],
     )
 
@@ -297,7 +301,10 @@ def ingest_document(
         ]
         if embeddable:
             emb_ids, texts = zip(*embeddable, strict=False)
-            vecs = embedder.embed(list(texts))
+            embed_inputs = [
+                f"{context_summary}\n\n{t}" if context_summary else t for t in texts
+            ]
+            vecs = embedder.embed(embed_inputs)
             store.add_embeddings(CHUNK, CHUNK_TEXT_COL, dict(zip(emb_ids, vecs, strict=False)))
             store.cypher(
                 "MATCH (c:Chunk) WHERE c.id IN $ids SET c.embedded = true",

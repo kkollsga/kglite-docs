@@ -8,6 +8,14 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — scale & polish
+- **Summary-augmented chunking (FEAT-11, opt-in).** `ingest(...,
+  context_summary="…")` (and `document("ingest", context_summary=…)`) prepends a
+  document-level blurb to each chunk *before embedding*, so the **vector** carries
+  global document context (mitigates cross-document speaker/source confusion à la
+  contextual retrieval) while the **stored chunk text stays clean** (search hits
+  are unchanged). The summary rides on the Document node and is applied by both
+  inline `embed=True` and the later `index()` pass. No LLM in core — you supply
+  the summary; default off is byte-identical to before.
 - **Single-writer guardrails (FEAT-12).** kglite-docs is single-writer; this
   makes that safe and ergonomic:
   - **Advisory lock.** Opening a `.kgl` while another *live* process already
