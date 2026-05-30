@@ -353,7 +353,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `threshold` (default 0.5). Returns weak_sentences for review.
         - **`claim`** — find chunks supporting a free-text claim
           (`verify_claim`). Requires `text`; optional `against_chunk_ids`,
-          `top_k`.
+          `top_k`. *Deprecated* — prefer the `study` flow (define → assess →
+          ledger) to evaluate a claim across chunks (richer, multi-agent,
+          verifiable); this one-shot helper remains for quick checks.
         - **`consensus`** — semantic search across summaries; groups by
           target with status counts. Requires `query`; optional `top_k`.
 

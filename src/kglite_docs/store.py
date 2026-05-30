@@ -20,6 +20,21 @@ import pandas as pd
 from kglite_docs.errors import ConcurrencyError
 
 
+class AttrDict(dict):  # type: ignore[type-arg]
+    """A plain dict that also allows attribute access — `d.col` is `d["col"]`.
+
+    Used for detail returns (e.g. `Corpus.get_chunk`) so both `detail["page"]`
+    and `detail.page` work. Fully backward-compatible: it *is* a dict, so
+    `.get`, item access, `isinstance(x, dict)`, and iteration are unchanged.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
 def _pid_alive(pid: int) -> bool:
     """Best-effort check that `pid` is a live process on this host."""
     if pid <= 0:

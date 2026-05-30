@@ -52,7 +52,7 @@ from kglite_docs.schema import (
     LABEL_EMBEDDED,
     LABEL_READY,
 )
-from kglite_docs.store import Store
+from kglite_docs.store import AttrDict, Store
 from kglite_docs.tagging import (
     chunks_by_tag as _chunks_by_tag,
 )
@@ -496,7 +496,7 @@ class Corpus:
         rows = _df_to_dicts(df)
         if not rows:
             return None
-        chunk = rows[0]
+        chunk = AttrDict(rows[0])  # both chunk["page"] and chunk.page work
         if with_neighbors:
             n_df = self._store.cypher(
                 "MATCH (c:Chunk {id: $id})-[:NEXT_CHUNK]->(n:Chunk) RETURN n.id AS id",
@@ -923,6 +923,12 @@ class Corpus:
         against_chunk_ids: list[str] | None = None,
         top_k: int = 5,
     ) -> dict[str, Any]:
+        """Find chunks that support a free-text claim via vector search.
+
+        Deprecated: prefer the `study` flow (`define_study` → `assess` →
+        `study_ledger`) to evaluate a claim across chunks — it's richer
+        (for/against + weight + provenance), multi-agent, and verifiable. This
+        one-shot helper remains for quick checks."""
         return quality_mod.verify_claim(
             self._store, self._embedder, claim_text=claim_text,
             against_chunk_ids=against_chunk_ids, top_k=top_k,
@@ -1270,6 +1276,10 @@ class Corpus:
     # ─── cypher escape hatch ──────────────────────────────────────────────
 
     def cypher(self, query: str, params: dict[str, Any] | None = None) -> Any:
+        """Run raw Cypher and return kglite's `ResultView`. It's ergonomic:
+        iterate it (`for row in corpus.cypher(...)` — each row is a plain dict),
+        index it (`result[0]["col"]`), take its `len(result)`, list it
+        (`result.to_list()`), or read `result.columns`."""
         return self._store.cypher(query, params)
 
     def schema(self) -> dict[str, Any]:

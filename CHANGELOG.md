@@ -8,6 +8,16 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — scale & polish
+- **Result/detail ergonomics + MCP surface review (FEAT-14).** `corpus.cypher()`
+  returns kglite's `ResultView` — now documented as iterable (`for row in res`,
+  each row a dict), indexable (`res[0]["col"]`), `len()`-able, with `.to_list()`
+  /`.columns` (a regression test locks this in). `get_chunk()` returns an
+  `AttrDict` so both `detail["section_id"]` and `detail.section_id` work (still a
+  plain dict otherwise). Surface review: the 13 nouns each stand; the one
+  redundancy — `summary("claim")` — is **soft-deprecated** in favour of the
+  first-class `study` flow (define → assess → ledger), which is richer,
+  multi-agent, and verifiable (the action still works). Rationale recorded in
+  `docs/architecture.md`.
 - **Summary-augmented chunking (FEAT-11, opt-in).** `ingest(...,
   context_summary="…")` (and `document("ingest", context_summary=…)`) prepends a
   document-level blurb to each chunk *before embedding*, so the **vector** carries

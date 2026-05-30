@@ -110,6 +110,35 @@ Read-only operations (`get_document`, `cypher_query`, `graph_overview`) don't re
 
 See `docs/perf.md` (or the consolidated plan) for the bottleneck audit and future levers.
 
+## Working with query results
+
+`corpus.cypher(query)` returns kglite's `ResultView`, which is ergonomic out of
+the box:
+
+```python
+res = corpus.cypher("MATCH (c:Chunk) RETURN c.id AS id, c.page_number AS page")
+for row in res:          # each row is a plain dict
+    print(row["id"], row["page"])
+res[0]["id"]             # index access
+len(res)                 # row count
+res.to_list()            # materialise to list[dict]
+res.columns              # column names
+```
+
+Detail getters like `corpus.get_chunk(id)` return an `AttrDict` — a dict that
+*also* allows attribute access, so both `detail["section_id"]` and
+`detail.section_id` work (it's still a plain dict for `.get`/`in`/iteration).
+
+## MCP surface — why 13 nouns
+
+The agent surface is 13 thin noun tools (plus `cypher_query` / `graph_overview`).
+Each noun is a distinct capability; nothing merges cleanly without losing
+clarity, so the count stands. The one redundancy — `summary("claim")`, a
+free-text "find chunks supporting a claim" — is soft-deprecated in favour of the
+first-class `study` flow (define → assess → ledger), which is richer,
+multi-agent, and verifiable. It still works; new workflows should reach for
+`study`.
+
 ## Concurrency — single-writer
 
 kglite-docs is **single-writer**: one process owns the `.kgl` file. "Parallel
