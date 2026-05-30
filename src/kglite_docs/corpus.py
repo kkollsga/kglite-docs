@@ -489,7 +489,7 @@ class Corpus:
                    c.{CHUNK_TEXT_COL} AS text, c.token_count AS token_count,
                    c.word_count AS word_count, c.char_count AS char_count,
                    c.content_kind AS content_kind, c.quality_score AS quality_score,
-                   c.boilerplate AS boilerplate,
+                   c.boilerplate AS boilerplate, c.entities_json AS entities_json,
                    c.headings_json AS headings, c.status AS status,
                    c.section_id AS section_id, c.doc_type AS doc_type,
                    c.view_count AS view_count
@@ -500,6 +500,12 @@ class Corpus:
         if not rows:
             return None
         chunk = AttrDict(rows[0])  # both chunk["page"] and chunk.page work
+        # Parse the structured-entity hints (FEAT-11.2) into a dict for the agent.
+        import json
+        try:
+            chunk["entities"] = json.loads(chunk.pop("entities_json", None) or "{}")
+        except (TypeError, ValueError):
+            chunk["entities"] = {}
         if with_neighbors:
             n_df = self._store.cypher(
                 "MATCH (c:Chunk {id: $id})-[:NEXT_CHUNK]->(n:Chunk) RETURN n.id AS id",

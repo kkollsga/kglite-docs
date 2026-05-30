@@ -61,6 +61,52 @@ def classify_content_kind(markdown: str) -> str:
     return "prose"
 
 
+#: Cap values stored per entity type per chunk (avoid bloat on dense chunks).
+MAX_ENTITIES_PER_TYPE = 50
+
+_MONTHS = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+_ENTITY_PATTERNS: dict[str, re.Pattern[str]] = {
+    "email": re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
+    "url": re.compile(r"\b(?:https?://|www\.)[^\s)<>\]]+", re.I),
+    "money": re.compile(
+        r"[$€£¥]\s?\d[\d.,]*"
+        r"|\b\d[\d.,]*\s?(?:USD|EUR|GBP|NOK|SEK|DKK|kr|dollars?|euros?|pounds?)\b"
+        r"|\b(?:USD|EUR|GBP|NOK|SEK|DKK|kr)\s?\d[\d.,]*",
+        re.I,
+    ),
+    "date": re.compile(
+        rf"\b\d{{4}}-\d{{2}}-\d{{2}}\b"
+        rf"|\b\d{{1,2}}/\d{{1,2}}/\d{{2,4}}\b"
+        rf"|\b{_MONTHS}\s+\d{{1,2}},?\s+\d{{4}}\b"
+        rf"|\b\d{{1,2}}\s+{_MONTHS}\s+\d{{4}}\b",
+        re.I,
+    ),
+    # Structured codes: letters then digits with a separator, or ≥3 digits.
+    "identifier": re.compile(r"\b[A-Z]{2,}[-/]\d{2,}\b|\b[A-Z]{2,}\d{3,}\b"),
+}
+
+
+def extract_entities(text: str) -> dict[str, list[str]]:
+    """Cheap, deterministic structured-entity extraction (regex) — dates, money,
+    emails, URLs, identifiers. Generic and **recall-oriented**: an advisory
+    routing hint (`MATCH (c:Chunk:HasMoney)`), not a guarantee. Domain-specific
+    entity types belong in a vertical, not here. Returns `{type: [values]}`,
+    each list order-preserving, de-duplicated, and capped."""
+    text = text or ""
+    out: dict[str, list[str]] = {}
+    for etype, pat in _ENTITY_PATTERNS.items():
+        seen: list[str] = []
+        for m in pat.finditer(text):
+            v = m.group(0).strip()
+            if v and v not in seen:
+                seen.append(v)
+                if len(seen) >= MAX_ENTITIES_PER_TYPE:
+                    break
+        if seen:
+            out[etype] = seen
+    return out
+
+
 def text_quality(markdown: str) -> float:
     """A 0..1 heuristic for how clean the extracted text looks (1.0 = clean).
     Low scores flag likely-garbled extraction (bad OCR/encoding). Advisory."""

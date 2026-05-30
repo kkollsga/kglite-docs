@@ -20,6 +20,12 @@ breaking changes (called out below).
     text looks garbled (bad OCR/encoding) — advisory.
   - `:Boilerplate` on verbatim-duplicate chunks (repeated disclaimers / pages),
     flagged but kept.
+  - **Structured-entity pre-tagging** (regex, generic): dates, money, emails,
+    URLs, and identifiers are extracted into an `entities` map (surfaced parsed on
+    `get_chunk()`) and flagged as `Has*` label predicates (`MATCH (c:Chunk:HasMoney)`)
+    so an agent jumps straight to the high-value chunks instead of reading
+    everything. Recall-oriented + advisory; domain-specific entity types stay in
+    a vertical, not core.
   All surfaced on `get_chunk()`; backward-compatible (re-ingest to populate).
 
 ## [0.0.10] — 2026-05-30

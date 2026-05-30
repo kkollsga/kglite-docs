@@ -25,6 +25,7 @@ from kglite_docs.schema import (
     CHUNK_STATUS_READY,
     CHUNK_TEXT_COL,
     DOCUMENT,
+    ENTITY_LABELS,
     HAS_CHUNK,
     HAS_PAGE,
     HAS_SECTION,
@@ -40,6 +41,7 @@ from kglite_docs.signals import (
     LOW_QUALITY_THRESHOLD,
     char_count,
     classify_content_kind,
+    extract_entities,
     text_quality,
     word_count,
 )
@@ -222,10 +224,12 @@ def ingest_document(
     # labels apply in one batch each.
     content_kind_ids: dict[str, list[str]] = {}
     low_quality_ids: list[str] = []
+    entity_ids: dict[str, list[str]] = {}
     for status, ch, p in all_chunks:
         cid = _chunk_id(doc_id, p.page_number, ch.chunk_index)
         kind = classify_content_kind(ch.text)
         quality = text_quality(ch.text)
+        entities = extract_entities(ch.text)
         chunk_rows.append({
             "id": cid,
             "title": (ch.text[:80] + "…") if ch.text else f"[needs ocr] p.{p.page_number}",
@@ -239,6 +243,7 @@ def ingest_document(
             "char_count": char_count(ch.text),
             "content_kind": kind,
             "quality_score": quality,
+            "entities_json": _safe_json(entities),
             "boilerplate": False,               # set below by the cross-page pass
             "headings_json": _safe_json(ch.headings),
             "status": status,                   # property still written
@@ -253,6 +258,8 @@ def ingest_document(
             content_kind_ids.setdefault(kind, []).append(cid)
         if kind in ("prose", "sparse") and quality < LOW_QUALITY_THRESHOLD:
             low_quality_ids.append(cid)
+        for etype in entities:
+            entity_ids.setdefault(etype, []).append(cid)
 
     # Boilerplate: identical text appearing in ≥2 chunks is a repeated
     # header/footer (across pages in a PDF, or duplicated in any format) — flag
@@ -297,6 +304,11 @@ def ingest_document(
         store.add_label(CHUNK, low_quality_ids, LABEL_LOW_QUALITY)
     if boilerplate_ids:
         store.add_label(CHUNK, boilerplate_ids, LABEL_BOILERPLATE)
+    # Structured-entity presence labels (HasDate / HasMoney / …).
+    for etype, ids in entity_ids.items():
+        ent_label = ENTITY_LABELS.get(etype)
+        if ent_label:
+            store.add_label(CHUNK, ids, ent_label)
 
     # Embedding lifecycle is tracked by the boolean `c.embedded` property
     # (set False above). The work-list is "ready chunks where embedded =

@@ -145,6 +145,7 @@ class ChunkDetail(TypedDict, total=False):
     content_kind: str
     quality_score: float
     boilerplate: bool
+    entities: dict[str, list[str]]
     headings: str
     section_id: str
     doc_type: str

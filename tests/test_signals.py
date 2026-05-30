@@ -10,6 +10,7 @@ from kglite_docs import Corpus
 from kglite_docs.signals import (
     char_count,
     classify_content_kind,
+    extract_entities,
     text_quality,
     word_count,
 )
@@ -37,6 +38,51 @@ def test_text_quality_and_counts() -> None:
     assert text_quality("x9#@ ~~~ ¤¤¤ §§§ ‹‹‹ zzqqxx ￿￿") < 0.55
     assert word_count("one two three") == 3
     assert char_count("  abc  ") == 3
+
+
+def test_extract_entities() -> None:
+    e = extract_entities(
+        "Email jane@acme.com, see https://acme.com on 2021-03-04; paid $1,250,000 "
+        "and NOK 50000 re PAD-003 and ABC1234."
+    )
+    assert e["email"] == ["jane@acme.com"]
+    assert e["url"] == ["https://acme.com"]
+    assert "2021-03-04" in e["date"]
+    assert "$1,250,000" in e["money"] and any("NOK" in m.upper() for m in e["money"])
+    assert set(e["identifier"]) >= {"PAD-003", "ABC1234"}
+    # No false positives on plain prose.
+    assert extract_entities("Dense retrieval uses BERT and a dual encoder here.") == {}
+
+
+def test_ingest_pretags_entities(corpus: Corpus, tmp_path: Path) -> None:
+    md = tmp_path / "e.md"
+    md.write_text(
+        "# Filing\n\nThe settlement of $1,250,000 was wired to ops@acme.com on "
+        "2021-03-04 under reference PAD-003.\n\n"
+        "# Other\n\nA paragraph with no structured entities at all in it here.\n",
+        encoding="utf-8",
+    )
+    doc_id = corpus.ingest(md).doc_id
+
+    # Label predicates route an agent straight to the high-value chunk.
+    money = corpus.cypher(
+        "MATCH (c:Chunk:HasMoney) WHERE c.doc_id = $d RETURN c.id AS id",
+        params={"d": doc_id},
+    ).to_list()
+    assert len(money) == 1
+    # get_chunk surfaces parsed entities.
+    d = corpus.get_chunk(money[0]["id"])
+    assert d is not None
+    ents = d["entities"]
+    assert "$1,250,000" in ents["money"]
+    assert ents["email"] == ["ops@acme.com"]
+    assert "2021-03-04" in ents["date"] and "PAD-003" in ents["identifier"]
+    # The entity-free chunk carries no Has* label / empty entities.
+    plain = corpus.cypher(
+        "MATCH (c:Chunk:Ready) WHERE c.doc_id = $d AND NOT c:HasMoney "
+        "RETURN c.id AS id", params={"d": doc_id},
+    ).to_list()
+    assert plain and corpus.get_chunk(plain[0]["id"])["entities"] == {}
 
 
 def test_ingest_stamps_content_signals(corpus: Corpus, tmp_path: Path) -> None:

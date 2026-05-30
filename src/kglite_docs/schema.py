@@ -193,6 +193,23 @@ LABEL_SPARSE: Final = "Sparse"
 LABEL_LOW_QUALITY: Final = "LowQuality"   # text looks garbled (bad OCR/encoding)
 LABEL_BOILERPLATE: Final = "Boilerplate"  # repeated header/footer across pages
 
+# Structured-entity presence flags (multi-valued → independent labels, not a
+# discriminator): `MATCH (c:Chunk:HasMoney)`.
+LABEL_HAS_DATE: Final = "HasDate"
+LABEL_HAS_MONEY: Final = "HasMoney"
+LABEL_HAS_EMAIL: Final = "HasEmail"
+LABEL_HAS_URL: Final = "HasUrl"
+LABEL_HAS_IDENTIFIER: Final = "HasIdentifier"
+
+#: Entity type (from `signals.extract_entities`) → presence label.
+ENTITY_LABELS: Final[dict[str, str]] = {
+    "date": LABEL_HAS_DATE,
+    "money": LABEL_HAS_MONEY,
+    "email": LABEL_HAS_EMAIL,
+    "url": LABEL_HAS_URL,
+    "identifier": LABEL_HAS_IDENTIFIER,
+}
+
 # Assessment stance → labels (`MATCH (a:Assessment:Supports)`)
 LABEL_SUPPORTS: Final = "Supports"
 LABEL_AGAINST: Final = "Against"
