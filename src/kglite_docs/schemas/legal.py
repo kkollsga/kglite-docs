@@ -178,3 +178,26 @@ register_lens(
     prompt="Scan dated events for ordering impossibilities or deadlines that "
            "could not have been met given the sequence in the record.",
 )
+
+# Follow-on study triggers — a verified finding implies the next question.
+from kglite_docs.recommend import register_recommendation_trigger  # noqa: E402
+
+register_recommendation_trigger(
+    "disparate_treatment", suggested_lens="disparity",
+    question_template="Possible judicial bias: did the court treat the parties "
+                      "unequally across the record (same trigger → harsher outcome "
+                      "for one party)?",
+    rationale="A disparate-treatment finding implies a bias question worth its own study.",
+)
+register_recommendation_trigger(
+    "conflicting_dispositions", suggested_lens="contradiction",
+    question_template="Which ruling is operative, and is the later disposition "
+                      "procedurally valid given the earlier one?",
+    rationale="Two conflicting operative outcomes raise a validity question.",
+)
+register_recommendation_trigger(
+    "ignored_favorable_evidence", suggested_lens="omission",
+    question_template="Due process: was the party's right to be heard violated by "
+                      "evidence or arguments the court never addressed?",
+    rationale="Repeatedly ignored favorable evidence implies a due-process study.",
+)

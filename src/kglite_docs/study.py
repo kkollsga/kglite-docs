@@ -423,7 +423,8 @@ def delete_study(store: Store, *, study_id: str) -> dict[str, Any]:
         "OPTIONAL MATCH (f)-[:HAS_VERIFICATION]->(fe:VerificationEvent) "
         "OPTIONAL MATCH (s)-[:HAS_SYNTHESIS_EVENT]->(se:SynthesisEvent) "
         "OPTIONAL MATCH (s)-[:HAS_ROUND]->(rr:ReviewRound) "
-        "DETACH DELETE s, a, ae, c, ce, f, fe, se, rr",
+        "OPTIONAL MATCH (s)-[:RECOMMENDS]->(rec:StudyRecommendation) "
+        "DETACH DELETE s, a, ae, c, ce, f, fe, se, rr, rec",
         params={"id": study_id},
     )
     # Checkouts reference the study by property, not edge — clean separately.

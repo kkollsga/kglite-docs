@@ -7,6 +7,17 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — follow-on study recommendations
+- **A concluded study never dead-ends a thread its own findings opened.**
+  `study("recommend")` proposes follow-on studies a study's findings imply
+  (proposals only — never auto-run), each seeded with the triggering findings;
+  `study("conclude")` now also returns these. `study("spawn", recommendation_id=…)`
+  approves one — creating the child study and a `SPAWNED_FROM` edge (child →
+  source) carrying the reason + seed findings. The finding-signal → study-template
+  mapping is an extensible **trigger registry** (`recommend.py`); the legal pack
+  seeds `disparate_treatment → judicial-bias`, `conflicting_dispositions → which
+  ruling operative`, `ignored_favorable_evidence → due-process`.
+
 ### Added — blind spots + completion policy
 - **`study("confidence")`** — per-finding confidence + named **blind spots**:
   `contested` / `low_depth_units` worklists, `coverage_by_lens` (every registered

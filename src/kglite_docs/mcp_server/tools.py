@@ -890,6 +890,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         reviewers: int = 1,
         level: int | None = None,
         round_id: str | None = None,
+        recommendation_id: str | None = None,
         target_id: str | None = None,
         target_kind: str = "finding",
         target_confidence: float = 0.0,
@@ -1028,11 +1029,19 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           conclude gate.**
         - **`synthesis_prompt`** — the prompt to read before synthesizing (the
           domain-neutral hunt list + any registered domain addenda).
+        - **`recommend`** — propose follow-on studies this study's findings imply
+          (proposals only, never auto-run), each seeded with the triggering
+          findings. Requires `study_id`.
+        - **`recommendations`** — proposals already recorded. Requires `study_id`.
+        - **`spawn`** — approve a recommendation → create the child study +
+          `SPAWNED_FROM` edge. Requires `recommendation_id`, `agent_id`.
         - **`conclude`** — write the study's conclusion (stored as a
           verifiable summary on the study). Requires `study_id`, `text`,
           `agent_id`; optional `embed`. **Refuses unless the study has been
-          synthesized** — pass `acknowledge_no_synthesis=true` to record an
-          audited skip (the skip is never silent).
+          synthesized** and its `completion_policy` (if any) is met — pass
+          `acknowledge_no_synthesis=true` to record an audited skip (never
+          silent). Returns `{conclusion_id, recommendations}` so the thread the
+          findings opened isn't dead-ended.
         - **`list`** — studies that have been run. Optional `status`
           (`open`/`closed`), `created_by`.
         - **`get`** — one study: metadata + tallies + conclusions. Requires
@@ -1145,8 +1154,19 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         if action == "synthesis_prompt":
             return {"prompt": corpus.synthesis_prompt()}
+        if action == "recommend":
+            return corpus.recommend_studies(_require(study_id, "study_id", action, "study"))
+        if action == "recommendations":
+            return corpus.list_recommendations(_require(study_id, "study_id", action, "study"))
+        if action == "spawn":
+            r = corpus.spawn_study(
+                _require(recommendation_id, "recommendation_id", action, "study"),
+                approved_by=_require(agent_id, "agent_id", action, "study"),
+            )
+            _persist(corpus)
+            return r
         if action == "conclude":
-            r = corpus.conclude_study(
+            cid = corpus.conclude_study(
                 _require(study_id, "study_id", action, "study"),
                 _require(text, "text", action, "study"),
                 agent_id=_require(agent_id, "agent_id", action, "study"),
@@ -1154,7 +1174,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 acknowledge_no_synthesis=acknowledge_no_synthesis,
             )
             _persist(corpus)
-            return r
+            # Surface follow-on proposals so a concluded study never dead-ends a
+            # thread its own findings opened (R8) — proposals only, never auto-run.
+            sid_val = _require(study_id, "study_id", action, "study")
+            return {"conclusion_id": cid, "recommendations": corpus.recommend_studies(sid_val)}
         if action == "conflicts":
             return corpus.study_conflicts(_require(study_id, "study_id", action, "study"))
         if action == "semantic_conflicts":
@@ -1244,5 +1267,5 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             "supersede, next, ledger, conflicts, semantic_conflicts, finding, "
             "findings, verify, synthesize, synthesis_prompt, escalate, next_review, "
             "record_review, close_round, rounds, lenses, confidence, set_policy, "
-            "conclude, list, get, reopen, delete",
+            "recommend, recommendations, spawn, conclude, list, get, reopen, delete",
         )

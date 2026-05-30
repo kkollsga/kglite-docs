@@ -28,6 +28,7 @@ FINDING: Final = "Finding"  # a cross-chunk pattern asserted over a SET of chunk
 VERIFICATION_EVENT: Final = "VerificationEvent"
 SYNTHESIS_EVENT: Final = "SynthesisEvent"  # a ledger-wide pattern pass (or its acknowledged skip)
 REVIEW_ROUND: Final = "ReviewRound"  # one escalation pass (a level/kind/lens over a unit set)
+STUDY_RECOMMENDATION: Final = "StudyRecommendation"  # a proposed follow-on study (never auto-runs)
 CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
 # Edge types
@@ -60,6 +61,8 @@ HAS_SYNTHESIS_EVENT: Final = "HAS_SYNTHESIS_EVENT"  # Study → SynthesisEvent
 HAS_ROUND: Final = "HAS_ROUND"                # Study → ReviewRound
 CONDUCTED_BY: Final = "CONDUCTED_BY"          # ReviewRound → Agent
 EXAMINED: Final = "EXAMINED"                  # ReviewRound → Chunk|Finding (the coverage record)
+RECOMMENDS: Final = "RECOMMENDS"              # Study → StudyRecommendation
+SPAWNED_FROM: Final = "SPAWNED_FROM"          # Study(child) → Study(source) (approved follow-on)
 
 # Punchcard lease: a checkout older than this is treated as abandoned and
 # its chunks become claimable again (and are GC'd on the next claim).
@@ -266,6 +269,16 @@ LABEL_ROUND_OPEN: Final = "RoundOpen"
 LABEL_ROUND_DONE: Final = "RoundDone"
 VALID_ROUND_SCOPES: Final = frozenset({"contested", "low_depth", "uncovered", "all"})
 
+# Study recommendation — a proposed follow-on study (a finding implies a new
+# question). A proposal a human approves, never auto-run.
+REC_PROPOSED: Final = "proposed"
+REC_APPROVED: Final = "approved"
+REC_DISMISSED: Final = "dismissed"
+LABEL_REC_PROPOSED: Final = "RecProposed"
+LABEL_REC_APPROVED: Final = "RecApproved"
+LABEL_REC_DISMISSED: Final = "RecDismissed"
+VALID_REC_STATUS: Final = frozenset({REC_PROPOSED, REC_APPROVED, REC_DISMISSED})
+
 # Assessment verification → labels (Unverified/Verified/Disputed reuse the
 # summary label *names*; Duplicate is study-specific)
 LABEL_DUPLICATE: Final = "Duplicate"
@@ -378,6 +391,12 @@ _ROUND_STATUS_LABELS: Final[dict[str, str]] = {
     ROUND_DONE: LABEL_ROUND_DONE,
 }
 
+_REC_STATUS_LABELS: Final[dict[str, str]] = {
+    REC_PROPOSED: LABEL_REC_PROPOSED,
+    REC_APPROVED: LABEL_REC_APPROVED,
+    REC_DISMISSED: LABEL_REC_DISMISSED,
+}
+
 _ASSESSMENT_STATUS_LABELS: Final[dict[str, str]] = {
     ASSESSMENT_UNVERIFIED: LABEL_UNVERIFIED,
     ASSESSMENT_VERIFIED: LABEL_VERIFIED,
@@ -440,6 +459,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "study.status": _STUDY_STATUS_LABELS,
     "study.synthesis_status": _STUDY_SYNTHESIS_LABELS,
     "round.status": _ROUND_STATUS_LABELS,
+    "recommendation.status": _REC_STATUS_LABELS,
     "assessment.verification_status": _ASSESSMENT_STATUS_LABELS,
     "assessment.provenance": _ASSESSMENT_PROVENANCE_LABELS,
     "finding.escalation_state": _FINDING_ESCALATION_LABELS,

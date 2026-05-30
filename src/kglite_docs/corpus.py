@@ -1430,6 +1430,26 @@ class Corpus:
             required_lenses=required_lenses, max_rounds=max_rounds,
         )
 
+    # ─── follow-on study recommendations ───────────────────────────────────
+
+    def recommend_studies(self, study_id: str) -> list[dict[str, Any]]:
+        """Propose follow-on studies a study's findings imply (proposals only —
+        never auto-run), each seeded with the triggering findings."""
+        from kglite_docs import recommend as recommend_mod
+        return recommend_mod.recommend_studies(self._store, study_id=study_id)
+
+    def list_recommendations(self, study_id: str) -> list[dict[str, Any]]:
+        """Follow-on study proposals already recorded for a study."""
+        from kglite_docs import recommend as recommend_mod
+        return recommend_mod.list_recommendations(self._store, study_id=study_id)
+
+    def spawn_study(self, recommendation_id: str, *, approved_by: str) -> dict[str, Any]:
+        """Approve a recommendation → create the child study + SPAWNED_FROM edge."""
+        from kglite_docs import recommend as recommend_mod
+        return recommend_mod.spawn_study(
+            self._store, recommendation_id=recommendation_id, approved_by=approved_by,
+        )
+
     def list_findings(
         self, study_id: str, *, finding_type: str | None = None,
     ) -> list[dict[str, Any]]:
