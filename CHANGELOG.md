@@ -7,6 +7,15 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.13] — 2026-05-30
+
+*Cross-chunk synthesis & leveled studies — from four 2026-05-30 field reports.
+The per-chunk assess/verify model was silently blind to **emergent cross-chunk
+patterns** (disparate treatment, conflicting dispositions); a study could be
+concluded "complete" while a whole class of finding was unreachable. This release
+makes that class first-class, observable, and gated — on generic primitives, with
+the legal vocabulary registered as a data pack.*
+
 ### Added — regression fixture + test helper
 - **Cross-chunk regression fixture wired into CI.** Adopted
   `sample_data/cross_chunk_fixture/` (synthetic, anonymized case TR-7788) and a
