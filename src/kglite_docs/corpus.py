@@ -1413,6 +1413,23 @@ class Corpus:
         from kglite_docs.lenses import available_lenses, lens_info
         return [{"name": n, **lens_info(n)} for n in available_lenses()]
 
+    def study_confidence(self, study_id: str) -> dict[str, Any]:
+        """Confidence + named blind spots for a study: per-finding confidence,
+        contested / low-depth worklists, `coverage_by_lens` (un-run lenses are
+        listed gaps), a recommended next escalation, and whether it's `settled`."""
+        return coverage_mod.study_confidence(self._store, study_id=study_id)
+
+    def set_completion_policy(
+        self, study_id: str, *, target_confidence: float = 0.0,
+        required_lenses: list[str] | None = None, max_rounds: int = 0,
+    ) -> dict[str, Any]:
+        """Set the bar `conclude_study` enforces (target confidence, required
+        lenses, max rounds) — makes "done" a checkable contract."""
+        return study_mod.set_completion_policy(
+            self._store, study_id=study_id, target_confidence=target_confidence,
+            required_lenses=required_lenses, max_rounds=max_rounds,
+        )
+
     def list_findings(
         self, study_id: str, *, finding_type: str | None = None,
     ) -> list[dict[str, Any]]:

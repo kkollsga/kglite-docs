@@ -270,3 +270,89 @@ def element_consistency(store: Store) -> dict[str, Any]:
         if derived != on_node:
             inconsistent.append(str(r["id"]))
     return {"checked": len(rows), "inconsistent": len(inconsistent), "sample": inconsistent[:20]}
+
+
+def study_confidence(store: Store, *, study_id: str) -> dict[str, Any]:
+    """Confidence + **blind spots** for a study (R4/R5). Turns un-run lenses into
+    a named, listed gap rather than a silent one:
+
+    - per-finding `confidence` / `escalation_state` / `reviewer_count`;
+    - `contested` and `low_depth_units` (the next-round worklists);
+    - `coverage_by_lens` — every *registered* lens with whether it has run and how
+      many units it examined; un-run lenses are the `blind_spots`;
+    - `recommended_next_escalation` — the most valuable next step (or None);
+    - `settled` — nothing contested, nothing shallow, and all required lenses run.
+    """
+    from kglite_docs import study as study_mod
+    from kglite_docs.lenses import available_lenses
+
+    meta = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.question AS question",
+        params={"id": study_id},
+    ))
+    if not meta:
+        raise InvalidEnumError(f"study not found: {study_id}")
+
+    findings = study_mod.list_findings(store, study_id=study_id)
+    contested = [f["finding_id"] for f in findings if f.get("escalation_state") == "contested"]
+    low_depth = [f["finding_id"] for f in findings if int(f.get("reviewer_count", 0)) < 2]
+
+    # Per-lens coverage from the rounds' EXAMINED edges.
+    rows = _df_dicts(store.cypher(
+        "MATCH (:Study {id: $id})-[:HAS_ROUND]->(r:ReviewRound) "
+        "OPTIONAL MATCH (r)-[:EXAMINED]->(u) "
+        "WHERE r.lens <> '' "
+        "RETURN r.lens AS lens, count(DISTINCT u) AS units, count(DISTINCT r) AS rounds",
+        params={"id": study_id},
+    ))
+    examined_by_lens = {r["lens"]: {"units": int(r.get("units") or 0), "rounds": int(r.get("rounds") or 0)}
+                        for r in rows if r.get("lens")}
+    coverage_by_lens: dict[str, Any] = {}
+    blind_spots: list[str] = []
+    for lens in available_lenses():
+        info = examined_by_lens.get(lens)
+        if info is None:
+            coverage_by_lens[lens] = {"run": False, "rounds": 0, "units_examined": 0}
+            blind_spots.append(lens)
+        else:
+            coverage_by_lens[lens] = {
+                "run": True, "rounds": info["rounds"], "units_examined": info["units"],
+            }
+
+    policy = study_mod.completion_policy(store, study_id)
+    required = policy.get("required_lenses", []) if policy else []
+    required_blind = [le for le in required if le not in examined_by_lens]
+
+    # Recommend the highest-leverage next step.
+    rec: dict[str, Any] | None = None
+    if contested:
+        rec = {"action": "escalate", "scope": "contested", "kind": "panel",
+               "why": f"{len(contested)} contested finding(s) need more reviewers"}
+    elif required_blind:
+        rec = {"action": "escalate", "scope": "uncovered", "lens": required_blind[0],
+               "why": f"required lens {required_blind[0]!r} has not run"}
+    elif low_depth:
+        rec = {"action": "escalate", "scope": "low_depth", "kind": "panel",
+               "why": f"{len(low_depth)} finding(s) reviewed by <2 agents"}
+    elif blind_spots:
+        rec = {"action": "escalate", "scope": "uncovered", "lens": blind_spots[0],
+               "why": f"lens {blind_spots[0]!r} has not run (a blind spot)"}
+
+    settled = not contested and not low_depth and not required_blind
+
+    return {
+        "study_id": study_id,
+        "question": meta[0]["question"],
+        "findings": [{
+            "finding_id": f["finding_id"], "statement": f.get("statement", ""),
+            "confidence": f.get("confidence", 0.0), "escalation_state": f.get("escalation_state"),
+            "reviewer_count": f.get("reviewer_count", 0),
+        } for f in findings],
+        "contested": contested,
+        "low_depth_units": low_depth,
+        "coverage_by_lens": coverage_by_lens,
+        "blind_spots": blind_spots,
+        "recommended_next_escalation": rec,
+        "completion_policy": policy,
+        "settled": settled,
+    }

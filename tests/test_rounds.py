@@ -75,6 +75,36 @@ def test_detectability_round_claims_uncovered_and_links_finding(corpus: Corpus, 
     assert len(corpus.list_rounds(sid)) == 1
 
 
+def test_study_confidence_lists_blind_spots(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.create_finding(sid, statement="dt", supporting_chunk_ids=[ch[0], ch[1]],
+                          stance="against", weight=0.9, agent_id="synth")
+    conf = corpus.study_confidence(sid)
+    # A registered-but-un-run lens is a NAMED blind spot, not a silent gap.
+    assert "tl_detect" in conf["blind_spots"]
+    assert conf["coverage_by_lens"]["tl_detect"]["run"] is False
+    assert conf["settled"] is False
+    assert conf["recommended_next_escalation"] is not None
+
+
+def test_completion_policy_gates_conclude(corpus: Corpus, tmp_path: Path) -> None:
+    from kglite_docs.errors import SynthesisRequiredError
+    ch = _chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    for c in ch[:3]:
+        corpus.assess(sid, c, stance="neutral", weight=0.1, agent_id="r1")
+    corpus.set_completion_policy(sid, required_lenses=["tl_detect"])
+    assert corpus.get_study(sid)["completion_policy"]["required_lenses"] == ["tl_detect"]
+    corpus.synthesize_study(sid, agent_id="lead")
+    # Synthesized, but the required lens hasn't run → still blocked.
+    with pytest.raises(SynthesisRequiredError):
+        corpus.conclude_study(sid, "done", agent_id="lead")
+    # Running the required lens clears the policy.
+    corpus.escalate_study(sid, kind="expert", created_by="lead", scope="uncovered", lens="tl_detect")
+    assert isinstance(corpus.conclude_study(sid, "done", agent_id="lead"), str)
+
+
 def test_escalate_validation(corpus: Corpus, tmp_path: Path) -> None:
     _chunks(corpus, tmp_path, n=2)
     sid = corpus.define_study("Q", created_by="lead")

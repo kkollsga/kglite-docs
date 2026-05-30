@@ -195,6 +195,7 @@ def get_study(store: Store, *, study_id: str) -> dict[str, Any] | None:
     study = rows[0]
     study["synthesis_status"] = study.get("synthesis_status") or SYNTHESIS_PENDING
     study["synthesis_events"] = _synthesis_events(store, study_id)
+    study["completion_policy"] = completion_policy(store, study_id)
     study["tallies"] = _tallies(store, study_id)
     study["findings"] = list_findings(store, study_id=study_id)
     # Conclusions are Summaries targeting the Study.
@@ -211,6 +212,74 @@ def _synthesis_status(store: Store, study_id: str) -> str:
         params={"id": study_id},
     ))
     return (rows[0].get("st") if rows else None) or SYNTHESIS_PENDING
+
+
+def set_completion_policy(
+    store: Store, *, study_id: str, target_confidence: float = 0.0,
+    required_lenses: list[str] | None = None, max_rounds: int = 0,
+) -> dict[str, Any]:
+    """Set the study's completion policy — the bar `conclude_study` enforces:
+    `target_confidence` (findings must reach it), `required_lenses` (must have
+    run), `max_rounds` (advisory). Makes "done" a checkable contract, not a vibe."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    policy = {
+        "target_confidence": float(target_confidence),
+        "required_lenses": list(required_lenses or []),
+        "max_rounds": int(max_rounds),
+    }
+    store.cypher(
+        "MATCH (s:Study {id: $id}) SET s.completion_policy_json = $j",
+        params={"id": study_id, "j": json.dumps(policy)},
+    )
+    return policy
+
+
+def completion_policy(store: Store, study_id: str) -> dict[str, Any] | None:
+    """The study's completion policy, or None if unset."""
+    rows = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.completion_policy_json AS j",
+        params={"id": study_id},
+    ))
+    raw = rows[0].get("j") if rows else None
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def lenses_run(store: Store, study_id: str) -> set[str]:
+    """The set of lenses that have been run (a round exists with that lens)."""
+    rows = _df_dicts(store.cypher(
+        "MATCH (:Study {id: $id})-[:HAS_ROUND]->(r:ReviewRound) "
+        "WHERE r.lens <> '' RETURN DISTINCT r.lens AS lens",
+        params={"id": study_id},
+    ))
+    return {r["lens"] for r in rows if r.get("lens")}
+
+
+def _conclude_blockers(store: Store, study_id: str) -> list[str]:
+    """Why a study isn't ready to conclude (empty == ready). The honest-
+    completeness gate: synthesis must have run, and any completion_policy met."""
+    reasons: list[str] = []
+    if _synthesis_status(store, study_id) != SYNTHESIS_DONE:
+        reasons.append('the cross-chunk synthesis pass has not run (study("synthesize"))')
+    policy = completion_policy(store, study_id)
+    if policy:
+        run = lenses_run(store, study_id)
+        missing = [le for le in policy.get("required_lenses", []) if le not in run]
+        if missing:
+            reasons.append(f"required lenses not run: {missing}")
+        tc = float(policy.get("target_confidence") or 0.0)
+        if tc > 0.0:
+            low = [f["finding_id"] for f in list_findings(store, study_id=study_id)
+                   if float(f.get("confidence") or 0.0) < tc]
+            if low:
+                reasons.append(f"{len(low)} finding(s) below target_confidence {tc}")
+    return reasons
 
 
 def _synthesis_events(store: Store, study_id: str) -> list[dict[str, Any]]:
@@ -296,23 +365,27 @@ def conclude_study(
     node (so it is attributed, revisable, and verifiable via `summary.verify`).
     Defaults to no embedding. Returns the conclusion (Summary) id.
 
-    **Honest-completeness gate.** Refuses (`SynthesisRequiredError`) unless a
-    cross-chunk synthesis pass has run (`study("synthesize", …)`) — so a study
-    can't be marked "done" while a whole class of cross-chunk finding is still
-    unreachable. Pass `acknowledge_no_synthesis=True` to override; the skip is
+    **Honest-completeness gate.** Refuses (`SynthesisRequiredError`) while the
+    study is not ready to conclude — the synthesis pass hasn't run, or a
+    `completion_policy` is unmet (a required lens un-run, or findings below the
+    target confidence). So a study can't be marked "done" while a whole class of
+    cross-chunk finding is unreachable or a required check is skipped. Pass
+    `acknowledge_no_synthesis=True` to override; the skip + its reasons are
     recorded as an audited `SynthesisEvent`, never silent."""
     if not _study_exists(store, study_id):
         raise InvalidEnumError(f"study not found: {study_id}")
-    if _synthesis_status(store, study_id) != SYNTHESIS_DONE:
+    blockers = _conclude_blockers(store, study_id)
+    if blockers:
         if not acknowledge_no_synthesis:
             raise SynthesisRequiredError(
-                f"study {study_id} has not been synthesized — run "
-                'study("synthesize", …) to hunt cross-chunk patterns first, or '
-                "pass acknowledge_no_synthesis=True to record an explicit skip."
+                f"study {study_id} is not ready to conclude — "
+                + "; ".join(blockers)
+                + ". Address these, or pass acknowledge_no_synthesis=True to "
+                "record an audited override."
             )
         _record_synthesis_event(
             store, study_id=study_id, kind="acknowledged_skip", agent_id=agent_id,
-            note="synthesis pass skipped at conclude",
+            note="; ".join(blockers),
         )
     from kglite_docs.enrich import add_summary
     return add_summary(

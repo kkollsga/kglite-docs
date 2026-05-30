@@ -7,6 +7,19 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — blind spots + completion policy
+- **`study("confidence")`** — per-finding confidence + named **blind spots**:
+  `contested` / `low_depth_units` worklists, `coverage_by_lens` (every registered
+  lens with whether it ran + units examined — un-run ones are listed
+  `blind_spots`, never silent), a `recommended_next_escalation`, and whether the
+  study is `settled`.
+- **`study("set_policy")`** — a `completion_policy` (`target_confidence`,
+  `required_lenses`, `max_rounds`) makes "done" a checkable contract:
+  `conclude` now refuses (with explicit reasons) while the policy is unmet — a
+  required lens un-run, or findings below target confidence — in addition to the
+  synthesis gate. The same audited `acknowledge_no_synthesis=true` override
+  records the skip + its reasons.
+
 ### Added — leveled review: escalation rounds + lens registry
 - **Spend review effort where it moves the needle.** `study("escalate", …)`
   opens a `ReviewRound` and hands back only its targeted worklist — never a blind

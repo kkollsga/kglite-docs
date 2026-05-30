@@ -892,6 +892,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         round_id: str | None = None,
         target_id: str | None = None,
         target_kind: str = "finding",
+        target_confidence: float = 0.0,
+        required_lenses: list[str] | None = None,
+        max_rounds: int = 0,
         doc_id: str | None = None,
         section_id: str | None = None,
         element: str | None = None,
@@ -1010,6 +1013,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         - **`rounds`** — a study's escalation history. Requires `study_id`.
         - **`lenses`** — analytical lenses available to escalate (a registered
           lens that hasn't run is a *named* blind spot, not a silent gap).
+        - **`confidence`** — per-finding confidence + **blind spots**:
+          `contested` / `low_depth_units` worklists, `coverage_by_lens` (un-run
+          lenses listed), `recommended_next_escalation`, and whether the study is
+          `settled`. Requires `study_id`.
+        - **`set_policy`** — set the bar `conclude` enforces. Requires
+          `study_id`; optional `target_confidence`, `required_lenses`,
+          `max_rounds`. Makes "done" a checkable contract.
         - **`synthesize`** — mark the cross-chunk **synthesis pass** as run (the
           second altitude above per-chunk assess: hunt disparate treatment,
           contradictions, omissions, aggregations — record each as a `finding`).
@@ -1204,6 +1214,16 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return corpus.list_rounds(_require(study_id, "study_id", action, "study"))
         if action == "lenses":
             return corpus.available_lenses()
+        if action == "confidence":
+            return corpus.study_confidence(_require(study_id, "study_id", action, "study"))
+        if action == "set_policy":
+            r = corpus.set_completion_policy(
+                _require(study_id, "study_id", action, "study"),
+                target_confidence=target_confidence,
+                required_lenses=required_lenses, max_rounds=max_rounds,
+            )
+            _persist(corpus)
+            return r
         if action == "list":
             return corpus.list_studies(status=status, created_by=created_by)
         if action == "get":
@@ -1223,6 +1243,6 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             f"study(): unknown action {action!r}. Valid: define, assess, assess_many, "
             "supersede, next, ledger, conflicts, semantic_conflicts, finding, "
             "findings, verify, synthesize, synthesis_prompt, escalate, next_review, "
-            "record_review, close_round, rounds, lenses, conclude, list, get, "
-            "reopen, delete",
+            "record_review, close_round, rounds, lenses, confidence, set_policy, "
+            "conclude, list, get, reopen, delete",
         )
