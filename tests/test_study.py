@@ -222,6 +222,7 @@ def test_conclude_writes_verifiable_summary(corpus: Corpus, tmp_path: Path) -> N
     ch = _ingest_chunks(corpus, tmp_path)
     sid = corpus.define_study("Q", created_by="lead")
     corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1")
+    corpus.synthesize_study(sid, agent_id="lead")  # clears the conclude gate
     cid = corpus.conclude_study(sid, "Evidence supports the claim.", agent_id="lead")
     assert isinstance(cid, str)
 
@@ -231,6 +232,32 @@ def test_conclude_writes_verifiable_summary(corpus: Corpus, tmp_path: Path) -> N
     # the conclusion is a Summary → verifiable via the summary machinery
     v = corpus.verify_summary(cid, verdict="verified", verifier_agent_id="checker")
     assert v["status"] == "verified"
+
+
+def test_synthesis_gate_blocks_conclude(corpus: Corpus, tmp_path: Path) -> None:
+    from kglite_docs.errors import SynthesisRequiredError
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1")
+    assert corpus.get_study(sid)["synthesis_status"] == "pending"
+    # The happy path can't silently skip the cross-chunk pass.
+    with pytest.raises(SynthesisRequiredError):
+        corpus.conclude_study(sid, "done", agent_id="lead")
+    # synthesize clears the gate.
+    corpus.synthesize_study(sid, agent_id="lead", note="ledger reviewed")
+    assert corpus.get_study(sid)["synthesis_status"] == "done"
+    assert isinstance(corpus.conclude_study(sid, "done", agent_id="lead"), str)
+
+
+def test_synthesis_skip_is_recorded(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.5, agent_id="a1")
+    # An override is allowed but never silent — it leaves an audited event.
+    corpus.conclude_study(sid, "done", agent_id="lead", acknowledge_no_synthesis=True)
+    events = corpus.get_study(sid)["synthesis_events"]
+    assert [e["kind"] for e in events] == ["acknowledged_skip"]
+    assert events[0]["by_agent"] == "lead"
 
 
 def test_reopen_and_list(corpus: Corpus, tmp_path: Path) -> None:
@@ -251,7 +278,7 @@ def test_delete_cascades_and_isolates(corpus: Corpus, tmp_path: Path) -> None:
     corpus.assess(s2, ch[0], stance="against", weight=0.5, agent_id="a1")  # same chunk, other study
     aid = corpus.study_ledger(s1)["rows"][0]["assessment_id"]
     corpus.verify_assessment(aid, verdict="verified", verifier_agent_id="checker")
-    corpus.conclude_study(s1, "done", agent_id="lead")
+    corpus.conclude_study(s1, "done", agent_id="lead", acknowledge_no_synthesis=True)
 
     res = corpus.delete_study(s1)
     assert res["assessments"] == 1 and res["conclusions"] == 1 and res["events"] == 1

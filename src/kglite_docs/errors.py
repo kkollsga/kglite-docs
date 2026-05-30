@@ -59,6 +59,15 @@ class ConcurrencyError(KgliteDocsError):
     """Multi-process write attempted on a single-writer `.kgl`."""
 
 
+class SynthesisRequiredError(KgliteDocsError):
+    """`conclude_study` was called before a ledger-wide cross-chunk synthesis
+    pass ran (`synthesis_status == pending`). Run `study("synthesize", …)`
+    first, or pass `acknowledge_no_synthesis=True` to record an explicit,
+    audited skip. Guards against a *confident-incomplete* conclusion — the
+    happy path marking a study "done" while a whole class of cross-chunk
+    finding is still unreachable."""
+
+
 __all__ = [
     "ConcurrencyError",
     "GroundingError",
@@ -69,5 +78,6 @@ __all__ = [
     "NotIndexedError",
     "ReviewConflict",
     "SelfVerificationError",
+    "SynthesisRequiredError",
     "UnsupportedFormatError",
 ]

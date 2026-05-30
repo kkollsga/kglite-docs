@@ -111,8 +111,30 @@ def rubric_text() -> str:
     return "\n".join(lines)
 
 
+#: Legal hunt cues appended to the generic synthesis prompt (the patterns a
+#: legal record hides across chunks — none declared by any single passage).
+SYNTHESIS_ADDENDUM = """\
+LEGAL CROSS-CHUNK PATTERNS (each is lawful-looking per chunk; the defect is in
+the JOIN — align rulings on party × trigger × date):
+- Disparate treatment — like non-appearances / breaches / requests resolved
+  differently by party (e.g. a justified absence → default, an unjustified one →
+  mere dismissal). Cite both rulings.
+- Conflicting dispositions — two operative outcomes that can't both stand (a case
+  extinguished without merits, then later condemned on the merits).
+- Ignored / unaddressed argument — a defense, evidence, or pleaded request the
+  court never ruled on (omission → due-process angle).
+- Prejudgment / shifting standard — the same court applying a different bar to
+  the same kind of question across the record.
+Score primary rulings, not the appeal brief's characterization of them — an
+advocacy passage *naming* the unfairness is `characterization`, not the proof."""
+
+
 # Register on import (idempotent). The order is irrelevant; values are globally
 # unique across the three families.
 register_element_discriminator("chunk.legal_role", LEGAL_ROLE)
 register_element_discriminator("chunk.legal_authority", LEGAL_AUTHORITY)
 register_element_discriminator("chunk.legal_evidence", LEGAL_EVIDENCE)
+
+from kglite_docs.synthesis import register_synthesis_addendum  # noqa: E402
+
+register_synthesis_addendum(SYNTHESIS_ADDENDUM)

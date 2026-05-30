@@ -112,7 +112,17 @@ embeddings; iterate chunks via study("next"), so you can skip index):
            "duplicate", verifier_agent_id="checker")    — 2nd-agent check
      study("supersede", assessment_id=old, stance=..., weight=..., agent_id=...)
        — correct another agent's row to one current winner (audit-preserving).
-  5. study("conclude", study_id=sid, text="...", agent_id="lead")
+  5. SYNTHESIZE (mandatory — per-chunk scoring is blind to cross-chunk patterns):
+     read study("synthesis_prompt"), then over the whole ledger hunt disparate
+     treatment, contradictions, two-operative-outcomes, omissions, aggregations —
+     record each as study("finding", supporting_chunk_ids=[…], stance=…, weight=…).
+     A 2nd agent grades them: study("verify", finding_id=…, verdict=…,
+     verifier_agent_id="checker") → confidence/escalation_state. Then mark the
+     pass done: study("synthesize", study_id=sid, agent_id="lead").
+  6. study("conclude", study_id=sid, text="...", agent_id="lead")
+       — REFUSES until step 5 ran (so you can't ship a confident-incomplete
+         conclusion). Genuinely nothing to synthesize? pass
+         acknowledge_no_synthesis=True to record an audited skip.
   Manage studies with study("list") / get / reopen / delete.
 
 MANY STUDIES ON ONE BIG CORPUS? CLASSIFY ONCE, ROUTE MANY. Re-reading a

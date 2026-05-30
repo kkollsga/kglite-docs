@@ -26,6 +26,7 @@ STUDY: Final = "Study"
 ASSESSMENT: Final = "Assessment"
 FINDING: Final = "Finding"  # a cross-chunk pattern asserted over a SET of chunks
 VERIFICATION_EVENT: Final = "VerificationEvent"
+SYNTHESIS_EVENT: Final = "SynthesisEvent"  # a ledger-wide pattern pass (or its acknowledged skip)
 CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
 # Edge types
@@ -54,6 +55,7 @@ HOLDS: Final = "HOLDS"                        # Agent → Checkout
 USED_CONTEXT: Final = "USED_CONTEXT"          # Assessment → Chunk (neighbors read to interpret the focal chunk)
 SUPERSEDES: Final = "SUPERSEDES"              # Assessment → Assessment (the one it replaces)
 SUPPORTED_BY: Final = "SUPPORTED_BY"          # Finding → Chunk (the chunks a cross-chunk pattern rests on)
+HAS_SYNTHESIS_EVENT: Final = "HAS_SYNTHESIS_EVENT"  # Study → SynthesisEvent
 
 # Punchcard lease: a checkout older than this is treated as abandoned and
 # its chunks become claimable again (and are GC'd on the next claim).
@@ -235,6 +237,15 @@ LABEL_SCANNED_UNREAD: Final = "ScannedUnread"
 LABEL_OPEN: Final = "Open"
 LABEL_CLOSED: Final = "Closed"
 
+# Study synthesis status — has a ledger-wide cross-chunk pattern pass run? The
+# honest-completeness gate: `conclude_study` refuses while this is `pending`
+# unless an override is explicitly recorded. (one-of-N via swap_label)
+SYNTHESIS_PENDING: Final = "pending"
+SYNTHESIS_DONE: Final = "done"
+LABEL_SYNTHESIS_PENDING: Final = "SynthesisPending"
+LABEL_SYNTHESIS_DONE: Final = "SynthesisDone"
+VALID_SYNTHESIS_STATUS: Final = frozenset({SYNTHESIS_PENDING, SYNTHESIS_DONE})
+
 # Assessment verification → labels (Unverified/Verified/Disputed reuse the
 # summary label *names*; Duplicate is study-specific)
 LABEL_DUPLICATE: Final = "Duplicate"
@@ -337,6 +348,11 @@ _STUDY_STATUS_LABELS: Final[dict[str, str]] = {
     STUDY_CLOSED: LABEL_CLOSED,
 }
 
+_STUDY_SYNTHESIS_LABELS: Final[dict[str, str]] = {
+    SYNTHESIS_PENDING: LABEL_SYNTHESIS_PENDING,
+    SYNTHESIS_DONE: LABEL_SYNTHESIS_DONE,
+}
+
 _ASSESSMENT_STATUS_LABELS: Final[dict[str, str]] = {
     ASSESSMENT_UNVERIFIED: LABEL_UNVERIFIED,
     ASSESSMENT_VERIFIED: LABEL_VERIFIED,
@@ -397,6 +413,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "tag.kind": _TAG_KIND_LABELS,
     "study.stance": _STUDY_STANCE_LABELS,
     "study.status": _STUDY_STATUS_LABELS,
+    "study.synthesis_status": _STUDY_SYNTHESIS_LABELS,
     "assessment.verification_status": _ASSESSMENT_STATUS_LABELS,
     "assessment.provenance": _ASSESSMENT_PROVENANCE_LABELS,
     "finding.escalation_state": _FINDING_ESCALATION_LABELS,

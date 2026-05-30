@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — synthesis lifecycle + honest-completeness gate
+- **A study can no longer be silently concluded while blind to cross-chunk
+  patterns.** The lifecycle is now `score → verify → synthesize → conclude`.
+  `study("synthesize", …)` marks the ledger-wide pattern pass as run (the agent
+  reads the whole ledger + records cross-chunk Findings); `study("conclude")`
+  **refuses** (`SynthesisRequiredError`) until it has, unless
+  `acknowledge_no_synthesis=true` records an audited `SynthesisEvent` (the skip is
+  never silent). `study("synthesis_prompt")` returns what to hunt — a
+  domain-neutral core list plus any registered domain addendum (the legal pack
+  adds disparate-treatment / conflicting-disposition / ignored-argument cues).
+  `get_study` surfaces `synthesis_status` + the synthesis-event trail.
+
 ### Added — leveled review: Finding verification + confidence
 - **Findings are gradeable by independent reviewers (`study("verify",
   finding_id=…)`).** A cross-chunk Finding now accumulates independent

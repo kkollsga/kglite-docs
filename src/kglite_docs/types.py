@@ -70,6 +70,7 @@ AssessmentStatus = Literal["unverified", "verified", "disputed", "duplicate"]
 
 #: Lifecycle of a `Study`.
 StudyStatus = Literal["open", "closed"]
+SynthesisStatus = Literal["pending", "done"]
 
 
 # ─── Result shapes ─────────────────────────────────────────────────────────
@@ -459,10 +460,13 @@ class StudyRow(TypedDict, total=False):
     title: str
     question: str
     status: StudyStatus
+    synthesis_status: SynthesisStatus   # pending until a cross-chunk synthesis pass runs
     created_by: str
     created_at: str
     assessment_count: int
     tallies: dict[str, Any]          # {supports, against, neutral, *_weight}
+    findings: list[FindingRow]       # cross-chunk findings (only on get_study)
+    synthesis_events: list[dict[str, Any]]  # synthesize / acknowledged_skip trail (get_study)
     conclusions: list[SummaryRow]    # only on get_study
 
 

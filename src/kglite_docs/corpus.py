@@ -1289,14 +1289,32 @@ class Corpus:
             verifier_agent_id=verifier_agent_id, notes=notes, provenance=provenance,
         )
 
+    def synthesize_study(
+        self, study_id: str, *, agent_id: str, note: str = "",
+    ) -> dict[str, Any]:
+        """Mark the cross-chunk synthesis pass as run (clears the conclude gate).
+        The agent reads the whole ledger + records cross-chunk Findings first;
+        see `synthesis_prompt()` for what to hunt."""
+        return study_mod.synthesize(self._store, study_id=study_id, agent_id=agent_id, note=note)
+
+    def synthesis_prompt(self) -> str:
+        """The prompt an agent reads before the synthesis pass — the
+        domain-neutral hunt list plus any registered domain addenda."""
+        from kglite_docs.synthesis import synthesis_prompt
+        return synthesis_prompt()
+
     def conclude_study(
         self, study_id: str, text: str, *,
         agent_id: str, model: str = "", embed: bool = False,
+        acknowledge_no_synthesis: bool = False,
     ) -> str:
-        """Write a conclusion (stored as a verifiable Summary on the Study)."""
+        """Write a conclusion (stored as a verifiable Summary on the Study).
+        Refuses (`SynthesisRequiredError`) unless the study has been synthesized,
+        unless `acknowledge_no_synthesis=True` records an audited skip."""
         return study_mod.conclude_study(
             self._store, self._embedder, study_id=study_id, text=text,
             agent_id=agent_id, model=model, embed=embed,
+            acknowledge_no_synthesis=acknowledge_no_synthesis,
         )
 
     def list_studies(

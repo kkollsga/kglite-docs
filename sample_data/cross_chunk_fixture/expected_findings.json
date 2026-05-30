@@ -1,0 +1,107 @@
+{
+  "case": "TR-7788/2023 (synthetic, anonymized)",
+  "purpose": "Regression fixture for cross-chunk / emergent-pattern detection. Each ruling reads as routine in isolation; the defects exist only in the RELATIONSHIP between sections. A per-chunk-only study must MISS the gold findings; a synthesis pass must RECOVER them.",
+  "anchors": {
+    "default_ruling": {
+      "section": "§2",
+      "marker": "declares the Respondent in DEFAULT",
+      "actor": "Respondent",
+      "trigger": "non-appearance (medically justified)",
+      "outcome": "default / defense precluded",
+      "date": "2023-05-04",
+      "provenance": "primary_text"
+    },
+    "dismissal_ruling": {
+      "section": "§3",
+      "marker": "DISMISSES the action without resolution of the merits",
+      "actor": "Claimant",
+      "trigger": "non-appearance (unjustified)",
+      "outcome": "action extinguished (Rule 51(I))",
+      "date": "2024-07-15",
+      "provenance": "primary_text"
+    },
+    "merits_condemnation": {
+      "section": "§4",
+      "marker": "condemned to pay",
+      "actor": "Respondent",
+      "outcome": "condemnation on merits + 5% bad-faith penalty",
+      "date": "2025-03-20",
+      "provenance": "primary_text"
+    },
+    "appeal_assertion": {
+      "section": "§5",
+      "marker": "treated the parties unequally",
+      "actor": "Respondent's counsel",
+      "note": "the ONLY place the defect is named — but it is advocacy",
+      "provenance": "characterization"
+    },
+    "omission_target": {
+      "section": "§7",
+      "marker": "jurisdiction objection was never decided",
+      "actor": "Tribunal (silence)",
+      "note": "a timely preliminary motion the court NEVER ruled on",
+      "provenance": "primary_text"
+    },
+    "nc_extension": {
+      "section": "§8",
+      "marker": "same rule was available to both parties on equal terms",
+      "actor": "Tribunal",
+      "note": "NEGATIVE CONTROL: different outcome, but the same rule applied evenly",
+      "provenance": "primary_text"
+    }
+  },
+  "per_chunk_baseline_expectation": {
+    "question": "Identify strange/illegal/inconsistent rulings by the Tribunal.",
+    "expected_outcome": "Scored chunk-by-chunk in isolation, §2/§3/§4 each read as a routine, lawful ruling and should score NEUTRAL. The only non-neutral hit is §5, which a strict verifier will (correctly) tag provenance=characterization and likely dispute as 'a party assertion, not proof'. NET: a per-chunk-only pipeline recovers ZERO of the gold synthesis findings. This is the trap the fixture encodes."
+  },
+  "gold_synthesis_findings": [
+    {
+      "id": "F1",
+      "type": "disparate_treatment",
+      "must_link_anchors": [
+        "default_ruling",
+        "dismissal_ruling"
+      ],
+      "summary": "Same trigger (party non-appearance) → opposite treatment by party: the Respondent's MEDICALLY-JUSTIFIED absence drew DEFAULT (defense precluded), while the Claimant's UNJUSTIFIED absence drew only dismissal. The harsher consequence fell on the party with the better excuse.",
+      "required_provenance": "primary_text",
+      "min_weight": 0.7
+    },
+    {
+      "id": "F2",
+      "type": "conflicting_dispositions",
+      "must_link_anchors": [
+        "dismissal_ruling",
+        "merits_condemnation"
+      ],
+      "summary": "Two operative dispositions coexist and contradict: §3 EXTINGUISHED the action (Rule 51(I)) for the Claimant's absence, yet §4 CONDEMNED the Respondent on the merits. Both cannot govern; which is operative is undetermined on the face of the record.",
+      "required_provenance": "primary_text",
+      "min_weight": 0.7
+    },
+    {
+      "id": "F3",
+      "type": "provenance_discipline",
+      "anchor": "appeal_assertion",
+      "summary": "§5 explicitly names the unequal treatment and self-contradiction — but it is the Respondent's ADVOCACY, not a ruling. A correct system must (a) tag it provenance=characterization and NOT treat it as proof, while (b) still surfacing F1/F2 from the PRIMARY rulings. The explicit statement and the provable defect live in different places.",
+      "required_handling": "characterization"
+    },
+    {
+      "id": "F4",
+      "type": "omission",
+      "anchor": "omission_target",
+      "lens": "omission",
+      "summary": "The court never ruled on the Respondent's timely jurisdiction motion (§7) — an omissão. The defect is the ABSENCE of a ruling; it is invisible to contradiction/disparity lenses because there is no conflicting text to find. Catching it requires an OMISSION lens that models what SHOULD be present (every raised preliminary must be decided).",
+      "required_handling": "Recoverable ONLY by an omission lens. If no omission lens is run, the system must at minimum report it as a coverage blind spot (omission lens NOT run) — never silently complete as if §7 were clean.",
+      "required_provenance": "primary_text",
+      "min_weight": 0.6
+    },
+    {
+      "id": "NC1",
+      "type": "negative_control",
+      "anchor": "nc_extension",
+      "summary": "§8: the Claimant received a filing extension the Respondent never requested. Different outcome, but the SAME rule was equally available — a lawful distinction, NOT bias.",
+      "required_handling": "Must NOT be promoted as disparate_treatment/bias. A naive disparity detector will flag it; a correct system (or a panel under leveled review) must keep it CONTESTED / low-agreement and NOT promote it. Promoting NC1 is a precision FAILURE (false positive)."
+    }
+  ],
+  "pass_criteria": "A correct synthesis layer outputs F1 and F2 as primary_text findings, each linking its two named anchor rulings, weight >= 0.7; tags §5 as characterization (F3); and conclude_study must NOT report the study complete until F1/F2 have surfaced. A study that concludes with only per-chunk neutral scores is a FAIL. || F4: an omission-lens finding flags the undecided §7 motion (or, if no omission lens ran, coverage_by_lens reports 'omission' NOT run as a blind spot). || NC1: no promoted bias/disparate_treatment finding links §8; under a panel it stays contested. Promoting NC1 = FAIL.",
+  "negative_controls": "§1 (petition) and §6 (clerical note) carry no defect and must NOT appear in any synthesis finding."
+}

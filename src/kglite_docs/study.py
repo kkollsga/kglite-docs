@@ -32,7 +32,11 @@ from typing import Any, cast
 
 from kglite_docs.activity import register_agent
 from kglite_docs.checkout import DEFAULT_ORDER, claim_or_preview
-from kglite_docs.errors import InvalidEnumError, SelfVerificationError
+from kglite_docs.errors import (
+    InvalidEnumError,
+    SelfVerificationError,
+    SynthesisRequiredError,
+)
 from kglite_docs.schema import (
     AGENT,
     ASSESSED_AS,
@@ -46,6 +50,7 @@ from kglite_docs.schema import (
     ESCALATION_NEEDS_MORE,
     ESCALATION_SETTLED,
     FINDING,
+    HAS_SYNTHESIS_EVENT,
     HAS_VERIFICATION,
     OF_STUDY,
     PROVENANCE_CHARACTERIZATION,
@@ -60,6 +65,9 @@ from kglite_docs.schema import (
     STUDY_OPEN,
     SUPERSEDES,
     SUPPORTED_BY,
+    SYNTHESIS_DONE,
+    SYNTHESIS_EVENT,
+    SYNTHESIS_PENDING,
     USED_CONTEXT,
     VALID_ASSESSMENT_VERDICTS,
     VALID_PROVENANCE,
@@ -139,11 +147,13 @@ def define_study(
             "created_by": created_by,
             "created_at": _now(),
             "status": status,
+            "synthesis_status": SYNTHESIS_PENDING,
         }],
     )
     status_label = label_for("study.status", status)
     if status_label:
         store.add_label(STUDY, [sid], status_label)
+    store.add_label(STUDY, [sid], label_for("study.synthesis_status", SYNTHESIS_PENDING))
     return sid
 
 
@@ -175,7 +185,7 @@ def get_study(store: Store, *, study_id: str) -> dict[str, Any] | None:
     """Study metadata + tallies + its conclusion summaries. None if missing."""
     df = store.cypher(
         "MATCH (s:Study {id: $id}) RETURN s.id AS id, s.title AS title, "
-        "s.question AS question, s.status AS status, "
+        "s.question AS question, s.status AS status, s.synthesis_status AS synthesis_status, "
         "s.created_by AS created_by, s.created_at AS created_at",
         params={"id": study_id},
     )
@@ -183,6 +193,8 @@ def get_study(store: Store, *, study_id: str) -> dict[str, Any] | None:
     if not rows:
         return None
     study = rows[0]
+    study["synthesis_status"] = study.get("synthesis_status") or SYNTHESIS_PENDING
+    study["synthesis_events"] = _synthesis_events(store, study_id)
     study["tallies"] = _tallies(store, study_id)
     study["findings"] = list_findings(store, study_id=study_id)
     # Conclusions are Summaries targeting the Study.
@@ -191,6 +203,65 @@ def get_study(store: Store, *, study_id: str) -> dict[str, Any] | None:
         store, target_id=study_id, target_kind=STUDY,
     )
     return study
+
+
+def _synthesis_status(store: Store, study_id: str) -> str:
+    rows = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.synthesis_status AS st",
+        params={"id": study_id},
+    ))
+    return (rows[0].get("st") if rows else None) or SYNTHESIS_PENDING
+
+
+def _synthesis_events(store: Store, study_id: str) -> list[dict[str, Any]]:
+    return _df_dicts(store.cypher(
+        "MATCH (:Study {id: $id})-[:HAS_SYNTHESIS_EVENT]->(e:SynthesisEvent) "
+        "RETURN e.kind AS kind, e.by_agent AS by_agent, e.note AS note, "
+        "e.created_at AS created_at ORDER BY e.created_at",
+        params={"id": study_id},
+    ))
+
+
+def synthesize(
+    store: Store, *, study_id: str, agent_id: str, note: str = "",
+) -> dict[str, Any]:
+    """Mark the ledger-wide cross-chunk **synthesis pass** as run for this study
+    (the agent has read the whole ledger and recorded any cross-chunk Findings;
+    the library records *that* it happened). Flips `synthesis_status` to `done`,
+    clearing the `conclude_study` gate. Idempotent. See `synthesis.synthesis_prompt`
+    for what the pass should hunt."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    register_agent(store, agent_id=agent_id)
+    _record_synthesis_event(store, study_id=study_id, kind="synthesize", agent_id=agent_id, note=note)
+    store.cypher(
+        "MATCH (s:Study {id: $id}) SET s.synthesis_status = $st",
+        params={"id": study_id, "st": SYNTHESIS_DONE},
+    )
+    store.swap_label(
+        STUDY, [study_id],
+        add=label_for("study.synthesis_status", SYNTHESIS_DONE),
+        remove_any_of=labels_for("study.synthesis_status"),
+    )
+    return {
+        "study_id": study_id, "synthesis_status": SYNTHESIS_DONE,
+        "findings": list_findings(store, study_id=study_id),
+    }
+
+
+def _record_synthesis_event(
+    store: Store, *, study_id: str, kind: str, agent_id: str, note: str = "",
+) -> str:
+    event_id = "synev_" + uuid.uuid4().hex[:16]
+    store.upsert_nodes(SYNTHESIS_EVENT, [{
+        "id": event_id, "title": f"{kind} by {agent_id}", "study_id": study_id,
+        "kind": kind, "by_agent": agent_id, "note": note, "created_at": _now(),
+    }])
+    store.upsert_edges(
+        HAS_SYNTHESIS_EVENT, [{"src": study_id, "dst": event_id}],
+        source_type=STUDY, target_type=SYNTHESIS_EVENT,
+    )
+    return event_id
 
 
 def reopen_study(store: Store, *, study_id: str, agent_id: str) -> dict[str, Any]:
@@ -219,12 +290,30 @@ def conclude_study(
     agent_id: str,
     model: str = "",
     embed: bool = False,
+    acknowledge_no_synthesis: bool = False,
 ) -> str:
     """Write a conclusion for the study — stored as a `Summary` on the `Study`
     node (so it is attributed, revisable, and verifiable via `summary.verify`).
-    Defaults to no embedding. Returns the conclusion (Summary) id."""
+    Defaults to no embedding. Returns the conclusion (Summary) id.
+
+    **Honest-completeness gate.** Refuses (`SynthesisRequiredError`) unless a
+    cross-chunk synthesis pass has run (`study("synthesize", …)`) — so a study
+    can't be marked "done" while a whole class of cross-chunk finding is still
+    unreachable. Pass `acknowledge_no_synthesis=True` to override; the skip is
+    recorded as an audited `SynthesisEvent`, never silent."""
     if not _study_exists(store, study_id):
         raise InvalidEnumError(f"study not found: {study_id}")
+    if _synthesis_status(store, study_id) != SYNTHESIS_DONE:
+        if not acknowledge_no_synthesis:
+            raise SynthesisRequiredError(
+                f"study {study_id} has not been synthesized — run "
+                'study("synthesize", …) to hunt cross-chunk patterns first, or '
+                "pass acknowledge_no_synthesis=True to record an explicit skip."
+            )
+        _record_synthesis_event(
+            store, study_id=study_id, kind="acknowledged_skip", agent_id=agent_id,
+            note="synthesis pass skipped at conclude",
+        )
     from kglite_docs.enrich import add_summary
     return add_summary(
         store, embedder,
@@ -258,7 +347,9 @@ def delete_study(store: Store, *, study_id: str) -> dict[str, Any]:
         "OPTIONAL MATCH (s)<-[:SUMMARIZES]-(c:Summary) "
         "OPTIONAL MATCH (c)-[:HAS_VERIFICATION]->(ce:VerificationEvent) "
         "OPTIONAL MATCH (s)<-[:OF_STUDY]-(f:Finding) "
-        "DETACH DELETE s, a, ae, c, ce, f",
+        "OPTIONAL MATCH (f)-[:HAS_VERIFICATION]->(fe:VerificationEvent) "
+        "OPTIONAL MATCH (s)-[:HAS_SYNTHESIS_EVENT]->(se:SynthesisEvent) "
+        "DETACH DELETE s, a, ae, c, ce, f, fe, se",
         params={"id": study_id},
     )
     # Checkouts reference the study by property, not edge — clean separately.

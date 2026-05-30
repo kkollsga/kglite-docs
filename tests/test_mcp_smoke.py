@@ -62,9 +62,13 @@ def test_mcp_study_workflow_round_trip(corpus: Corpus, tmp_path: Path) -> None:
                             "verdict": "verified", "verifier_agent_id": "checker"})
     assert v["status"] == "verified"
 
+    # conclude is gated on synthesis — synthesize first (the happy path).
+    syn = _call(app, "study", {"action": "synthesize", "study_id": sid, "agent_id": "lead"})
+    assert syn["synthesis_status"] == "done"
     _call(app, "study", {"action": "conclude", "study_id": sid, "text": "Supported.", "agent_id": "lead"})
     got = _call(app, "study", {"action": "get", "study_id": sid})
     assert got["conclusions"][0]["text"] == "Supported."
+    assert got["synthesis_status"] == "done"
 
 
 @pytest.mark.mcp

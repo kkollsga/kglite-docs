@@ -892,6 +892,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         status: str | None = None,
         created_by: str | None = None,
         embed: bool = False,
+        acknowledge_no_synthesis: bool = False,
         limit: int = 200,
     ) -> Any:
         """Evidence study: judge chunks for/against a claim, rank, verify.
@@ -977,9 +978,19 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           checked, recorded on the event). Verifying a finding recomputes its
           escalation_state (settled / contested / needs_more). Self-verification
           is rejected.
+        - **`synthesize`** — mark the cross-chunk **synthesis pass** as run (the
+          second altitude above per-chunk assess: hunt disparate treatment,
+          contradictions, omissions, aggregations — record each as a `finding`).
+          Requires `study_id`, `agent_id`; optional `notes`. Read
+          `study("synthesis_prompt")` first for what to hunt. **Clears the
+          conclude gate.**
+        - **`synthesis_prompt`** — the prompt to read before synthesizing (the
+          domain-neutral hunt list + any registered domain addenda).
         - **`conclude`** — write the study's conclusion (stored as a
           verifiable summary on the study). Requires `study_id`, `text`,
-          `agent_id`; optional `embed`.
+          `agent_id`; optional `embed`. **Refuses unless the study has been
+          synthesized** — pass `acknowledge_no_synthesis=true` to record an
+          audited skip (the skip is never silent).
         - **`list`** — studies that have been run. Optional `status`
           (`open`/`closed`), `created_by`.
         - **`get`** — one study: metadata + tallies + conclusions. Requires
@@ -1082,12 +1093,23 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 )
             _persist(corpus)
             return r
+        if action == "synthesize":
+            r = corpus.synthesize_study(
+                _require(study_id, "study_id", action, "study"),
+                agent_id=_require(agent_id, "agent_id", action, "study"),
+                note=notes,
+            )
+            _persist(corpus)
+            return r
+        if action == "synthesis_prompt":
+            return {"prompt": corpus.synthesis_prompt()}
         if action == "conclude":
             r = corpus.conclude_study(
                 _require(study_id, "study_id", action, "study"),
                 _require(text, "text", action, "study"),
                 agent_id=_require(agent_id, "agent_id", action, "study"),
                 model=model, embed=embed,
+                acknowledge_no_synthesis=acknowledge_no_synthesis,
             )
             _persist(corpus)
             return r
@@ -1130,5 +1152,5 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         raise ValueError(
             f"study(): unknown action {action!r}. Valid: define, assess, assess_many, "
             "supersede, next, ledger, conflicts, finding, findings, verify, "
-            "conclude, list, get, reopen, delete",
+            "synthesize, synthesis_prompt, conclude, list, get, reopen, delete",
         )
