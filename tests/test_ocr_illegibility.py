@@ -60,7 +60,7 @@ def test_force_reocr_replaces_chunks(corpus: Corpus, tmp_path: Path) -> None:
         corpus.request_ocr(page_id=pid, agent_id="opus")
     # Force re-OCR (escalate to a stronger model) → task again.
     task = corpus.request_ocr(page_id=pid, agent_id="opus", force=True)
-    assert task["image_b64"]
+    assert task["tiles"] and task["tiles"][0]["image_b64"]
     # Re-submit replaces the prior chunk (no duplicates) and clears illegibility.
     corpus.submit_ocr(pid, "# Recovered\n\n" + ("Clear legible ruling text here. " * 8),
                       agent_id="opus", model="opus")

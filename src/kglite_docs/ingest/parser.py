@@ -159,10 +159,75 @@ def parse_pdf(path: str | Path) -> list[PageContent]:
     return out
 
 
-def render_page_png(path: str | Path, page_number: int, *, dpi: int = 200) -> bytes:
-    """Rasterise a single page to PNG bytes. Used by the OCR handoff:
-    the MCP `list_pending_ocr` tool returns these for an agent to read."""
+#: A vision model's effective input is ~1.15 MP (~1568 px long edge); a page
+#: rendered larger is *silently* downscaled by the API — which destroys fine
+#: print on dense/faded scans. So the library (the image SENDER) right-sizes what
+#: it ships instead of leaving an opaque resize to the model.
+MODEL_MAX_PIXELS = 1_150_000
+
+
+def _fit_scale(rect: Any, dpi: int, max_pixels: int) -> float:
+    """The pymupdf render scale for `dpi`, reduced so the rasterised page lands
+    at or under `max_pixels`."""
+    base = dpi / 72.0
+    px = (rect.width * base) * (rect.height * base)
+    return base * (max_pixels / px) ** 0.5 if px > max_pixels else base
+
+
+def render_page_png(
+    path: str | Path, page_number: int, *, dpi: int = 200,
+    max_pixels: int = MODEL_MAX_PIXELS,
+) -> bytes:
+    """Rasterise a whole page to PNG bytes, **downscaled to fit `max_pixels`** so
+    the image isn't silently shrunk by the consumer. Used for previews
+    (`list_pending_ocr`). For detail-preserving OCR of dense pages use
+    `render_page_images` (which tiles instead of downscaling)."""
     with pymupdf.open(str(path)) as doc:
         page = doc[page_number - 1]
-        pix = page.get_pixmap(dpi=dpi)
+        scale = _fit_scale(page.rect, dpi, max_pixels)
+        pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale))
         return bytes(pix.tobytes("png"))
+
+
+def render_page_images(
+    path: str | Path, page_number: int, *, dpi: int = 200,
+    max_pixels: int = MODEL_MAX_PIXELS, overlap: float = 0.08,
+) -> list[dict[str, Any]]:
+    """Render a page as one or more base64 PNG **tiles**, each within
+    `max_pixels`. If the page at `dpi` already fits, returns a single full-page
+    tile. Otherwise splits it into overlapping horizontal bands rendered at full
+    `dpi` (detail preserved within the cap) — the lever for dense/faded scans
+    that a single downscaled image turns to blur. Each tile:
+    `{tile_index, image_b64, image_mime, bbox:[x0,y0,x1,y1], px:[w,h]}`."""
+    import base64
+    import math
+
+    with pymupdf.open(str(path)) as doc:
+        page = doc[page_number - 1]
+        rect = page.rect
+        base = dpi / 72.0
+        full_px = (rect.width * base) * (rect.height * base)
+
+        def _tile(idx: int, clip: Any) -> dict[str, Any]:
+            band_px = (clip.width * base) * (clip.height * base)
+            scale = base if band_px <= max_pixels else base * (max_pixels / band_px) ** 0.5
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip)
+            return {
+                "tile_index": idx,
+                "image_b64": base64.b64encode(bytes(pix.tobytes("png"))).decode("ascii"),
+                "image_mime": "image/png",
+                "bbox": [clip.x0, clip.y0, clip.x1, clip.y1],
+                "px": [pix.width, pix.height],
+            }
+
+        if full_px <= max_pixels:
+            return [_tile(0, rect)]
+        n = math.ceil(full_px / max_pixels)
+        band = rect.height / n
+        ov = band * overlap
+        tiles: list[dict[str, Any]] = []
+        for i in range(n):
+            y0 = rect.y0 + i * band - (ov if i > 0 else 0)
+            y1 = rect.y0 + (i + 1) * band + (ov if i < n - 1 else 0)
+            tiles.append(_tile(i, pymupdf.Rect(rect.x0, max(rect.y0, y0), rect.x1, min(rect.y1, y1))))
+        return tiles

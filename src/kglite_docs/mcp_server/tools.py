@@ -731,6 +731,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         model: str = "",
         confidence: float | None = None,
         force: bool = False,
+        tiles: list[dict[str, Any]] | None = None,
     ) -> Any:
         """OCR pipeline (for scanned/image pages flagged `needs_ocr`).
         kglite-docs ships NO OCR engine — you (a vision-capable agent) are the
@@ -746,9 +747,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           (all `[ilegível]`/near-empty) — effectively unreadable, the retry
           worklist. Without this they silently count as covered. Optional
           `doc_id`, `limit`, `include_images` (re-render for a stronger model).
-        - **`request`** — the lazy path: get the OCR **task** for one page (the
-          rendered page `image_b64` + a strict verbatim `prompt`) instead of
-          empty text. Identify by `page_id` or `doc_id`+`page_number`; requires
+        - **`request`** — the lazy path: get the OCR **task** for one page — the
+          rendered page right-sized to the model's input as `tiles` (one full-page
+          tile if it fits, else detail-preserving overlapping tiles for a dense
+          scan; single-tile also echoed as `image_b64`) + a strict verbatim
+          `prompt`. Identify by `page_id` or `doc_id`+`page_number`; requires
           `agent_id`. Pass `agent_type` to route the task to a specific OCR
           subagent (echoed back; you dispatch it). Raises if the page isn't
           flagged `needs_ocr` — pass `force=true` to re-OCR an already-done page
@@ -756,7 +759,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           replaces its chunks.
         - **`submit`** — patch your transcription back into a page; re-chunks +
           re-embeds and marks the chunks `ocr_derived`. Requires `page_id`,
-          `markdown`, `agent_id`.
+          `agent_id`, and either `markdown` (whole page) or `tiles=[{tile_index,
+          markdown}]` from a tiled request (the library stitches them in order).
 
         Example::
 
@@ -787,11 +791,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             _persist(corpus)
             return r
         if action == "submit":
+            if not markdown and not tiles:
+                raise ValueError("ocr('submit'): pass markdown=… or tiles=[…]")
             r = corpus.submit_ocr(
                 _require(page_id, "page_id", action, "ocr"),
-                _require(markdown, "markdown", action, "ocr"),
+                markdown or "",
                 agent_id=_require(agent_id, "agent_id", action, "ocr"),
-                model=model, confidence=confidence,
+                model=model, confidence=confidence, tiles=tiles,
             )
             _persist(corpus)
             return r

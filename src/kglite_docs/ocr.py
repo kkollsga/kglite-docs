@@ -20,6 +20,7 @@ from kglite_docs.ingest.chunker import chunk_page
 from kglite_docs.ingest.parser import (
     OCR_TEXT_THRESHOLD,
     _extractable_alnum,
+    render_page_images,
     render_page_png,
 )
 from kglite_docs.schema import (
@@ -306,21 +307,37 @@ def request_ocr(
         )
     register_agent(store, agent_id=agent_id)
     pno = int(r["page_number"])
-    png = render_page_png(doc_path, pno, dpi=dpi)
+    # Right-size the image to the model's input: one full-page tile if it fits,
+    # else detail-preserving overlapping tiles (don't ship a blur the model
+    # would downscale anyway).
+    tiles = render_page_images(doc_path, pno, dpi=dpi)
     prior = r.get("prior") or ""
     requested_at = prior or _now()
     store.cypher(
         "MATCH (p:Page {id: $pid}) SET p.ocr_requested_by = $aid, "
-        "p.ocr_agent_type = $at, p.ocr_requested_at = $ra",
-        params={"pid": r["page_id"], "aid": agent_id, "at": agent_type, "ra": requested_at},
+        "p.ocr_agent_type = $at, p.ocr_requested_at = $ra, "
+        "p.ocr_render_dpi = $dpi, p.ocr_tiles = $nt",
+        params={"pid": r["page_id"], "aid": agent_id, "at": agent_type,
+                "ra": requested_at, "dpi": int(dpi), "nt": len(tiles)},
     )
-    return {
+    out: dict[str, Any] = {
         "page_id": r["page_id"], "doc_id": r["doc_id"], "page_number": pno,
         "prompt": OCR_PROMPT, "agent_type": agent_type,
-        "image_b64": base64.b64encode(png).decode("ascii"), "image_mime": "image/png",
+        "tiles": tiles, "tile_count": len(tiles),
         "already_requested": bool(prior),
-        "submit_with": "ocr('submit', page_id=…, markdown=<transcription>, agent_id=…)",
     }
+    if len(tiles) == 1:
+        # Backward-compatible single-image shape; transcribe → submit markdown.
+        out["image_b64"] = tiles[0]["image_b64"]
+        out["image_mime"] = tiles[0]["image_mime"]
+        out["submit_with"] = "ocr('submit', page_id=…, markdown=<transcription>, agent_id=…)"
+    else:
+        # Transcribe each tile (top→bottom, overlapping); submit them to stitch.
+        out["submit_with"] = (
+            "ocr('submit', page_id=…, agent_id=…, "
+            "tiles=[{tile_index, markdown}, …])  # library stitches in order"
+        )
+    return out
 
 
 def submit_ocr(
@@ -328,19 +345,26 @@ def submit_ocr(
     embedder: Any,
     *,
     page_id: str,
-    markdown: str,
+    markdown: str = "",
     agent_id: str,
     model: str = "",
     confidence: float | None = None,
+    tiles: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Patch OCR-derived markdown back into the graph.
 
-    - Marks the Page as having text, `needs_ocr=False`.
-    - Deletes the placeholder Chunk(s) on that page (status=needs_ocr).
-    - Re-chunks the supplied markdown into fresh Chunks (status=ready),
-      wires HAS_CHUNK + NEXT_CHUNK locally, and writes embeddings.
+    - Pass whole-page `markdown`, **or** `tiles=[{tile_index, markdown}, …]` from a
+      tiled `request_ocr` — the library stitches them in `tile_index` order.
+    - Marks the Page `needs_ocr=False` + records its legibility `ocr_outcome`.
+    - Replaces all Chunk(s) on the page with fresh `ready` Chunks (HAS_CHUNK +
+      NEXT_CHUNK), and writes embeddings.
     """
     register_agent(store, agent_id=agent_id)
+    if tiles:
+        ordered = sorted(tiles, key=lambda t: int(t.get("tile_index", 0)))
+        markdown = "\n\n".join(
+            str(t.get("markdown", "")).strip() for t in ordered if str(t.get("markdown", "")).strip()
+        )
     markdown = markdown.strip()
     page_rows = _df_dicts(store.cypher(
         "MATCH (p:Page {id: $id}) RETURN p.doc_id AS doc_id, p.page_number AS page_number",

@@ -991,15 +991,19 @@ class Corpus:
     def submit_ocr(
         self,
         page_id: str,
-        markdown: str,
+        markdown: str = "",
         *,
         agent_id: str,
         model: str = "",
         confidence: float | None = None,
+        tiles: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        """Patch an agent's transcription back into a page. Pass whole-page
+        `markdown`, or `tiles=[{tile_index, markdown}]` from a tiled `request_ocr`
+        (stitched in order). Records the legibility `ocr_outcome`."""
         return ocr_mod.submit_ocr(
             self._store, self._embedder, page_id=page_id, markdown=markdown,
-            agent_id=agent_id, model=model, confidence=confidence,
+            agent_id=agent_id, model=model, confidence=confidence, tiles=tiles,
         )
 
     # ─── clustering ───────────────────────────────────────────────────────

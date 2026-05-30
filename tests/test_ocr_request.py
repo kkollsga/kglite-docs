@@ -32,7 +32,7 @@ def _pending_page_id(corpus: Corpus, tmp_path: Path) -> str:
 def test_request_returns_task_and_records(corpus: Corpus, tmp_path: Path) -> None:
     pid = _pending_page_id(corpus, tmp_path)
     task = corpus.request_ocr(page_id=pid, agent_id="lead", agent_type="vision-ocr")
-    assert task["image_b64"] and task["image_mime"] == "image/png"
+    assert task["tiles"] and task["tiles"][0]["image_b64"] and task["tiles"][0]["image_mime"] == "image/png"
     assert "VERBATIM" in task["prompt"]
     assert task["agent_type"] == "vision-ocr"
     assert task["already_requested"] is False

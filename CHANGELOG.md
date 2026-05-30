@@ -7,6 +7,19 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — adaptive image prep + tiling (attack illegibility at the source)
+- **The library right-sizes the page image it ships for OCR.** A page rendered
+  larger than a vision model's input (~1.15 MP) is silently downscaled by the
+  API, destroying fine print on dense/faded scans (a chunk of the illegible 25%).
+  Now `request_ocr` returns the page as **tiles** fit to that cap: one full-page
+  tile if it fits, else **detail-preserving overlapping tiles** rendered at full
+  dpi (`render_page_images`). `submit_ocr` accepts `tiles=[{tile_index, markdown}]`
+  and stitches them in order (or whole-page `markdown` as before). Preview renders
+  (`list_pending_ocr`/`illegible`) are downscaled under the cap too. The page
+  records `ocr_render_dpi`/`ocr_tiles` for provenance ("illegible even after
+  tiling" vs "illegible because downscaled"). All in Python via pymupdf — no Rust,
+  no new deps.
+
 ### Added — re-OCR an already-done page (`force`)
 - **`ocr("request", …, force=true)`** re-OCRs a page that's already transcribed —
   so an `illegible`/`partial` result can be escalated to a stronger model
