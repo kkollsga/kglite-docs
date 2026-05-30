@@ -7,6 +7,14 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.12] — 2026-05-30
+
+Release theme: **multi-study routing** — classify a corpus once into a domain
+element schema (a bundled legal vocabulary), then scope studies to the relevant
+element so many studies stop re-scanning the whole corpus. Scoping is advisory
+(rank-first) and carries a `scope_coverage` block — a speedup that is never
+lossy.
+
 ### Added — multi-study routing (element classification)
 - **Extensible element-discriminator registry (core primitive).** A domain schema
   can now register element discriminators (`register_element_discriminator(name,
