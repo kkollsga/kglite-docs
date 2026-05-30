@@ -35,7 +35,9 @@ _COLS = (
     "c.id AS id, c.doc_id AS doc_id, c.page_number AS page, "
     "c.chunk_index AS chunk_index, c.text AS text, c.title AS title"
 )
-_ORDER = "ORDER BY c.doc_id, c.page_number, c.chunk_index LIMIT $lim"
+#: Default reading-order. Callers may pass a rank-prefixed order (e.g. element
+#: scoping) — it must end with `LIMIT $lim` and reference only the chunk `c`.
+DEFAULT_ORDER = "ORDER BY c.doc_id, c.page_number, c.chunk_index LIMIT $lim"
 
 
 def _now() -> str:
@@ -50,9 +52,11 @@ def claim_or_preview(
     base_params: dict[str, Any],
     checkout_key: str,
     agent_id: str | None,
+    order_by: str = DEFAULT_ORDER,
     ttl_seconds: int = CLAIM_TTL_SECONDS,
 ) -> list[dict[str, Any]]:
-    """Select the work-list (`WHERE {where_sql} AND {not_done}`), in reading order.
+    """Select the work-list (`WHERE {where_sql} AND {not_done}`), ordered by
+    `order_by` (reading order by default).
 
     Preview (no `agent_id`): just return it. Claim (`agent_id`): GC stale
     checkouts for `checkout_key`, select only unclaimed rows, and punch a
@@ -61,7 +65,7 @@ def claim_or_preview(
     """
     if not agent_id:
         return _df_dicts(store.cypher(
-            f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} RETURN {_COLS} {_ORDER}",
+            f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} RETURN {_COLS} {order_by}",
             params=base_params,
         ))
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)).isoformat()
@@ -74,7 +78,7 @@ def claim_or_preview(
         )
         rows = _df_dicts(store.cypher(
             f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} AND {not_claimed} "
-            f"RETURN {_COLS} {_ORDER}",
+            f"RETURN {_COLS} {order_by}",
             params=params,
         ))
         if rows:

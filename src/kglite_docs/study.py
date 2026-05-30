@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from kglite_docs.activity import register_agent
-from kglite_docs.checkout import claim_or_preview
+from kglite_docs.checkout import DEFAULT_ORDER, claim_or_preview
 from kglite_docs.errors import InvalidEnumError, SelfVerificationError
 from kglite_docs.schema import (
     AGENT,
@@ -57,8 +57,10 @@ from kglite_docs.schema import (
     VALID_STANCES,
     VERIFICATION_EVENT,
     VERIFIED_BY,
+    element_label,
     label_for,
     labels_for,
+    valid_element_values,
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts
@@ -81,6 +83,22 @@ _PROVENANCE_LABEL_SET = set(labels_for("assessment.provenance"))
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _element_label_or_raise(element: str | None) -> str | None:
+    """Validate an `element=` scope token against the *registered* allow-list and
+    return its label (advisory-scoping safeguard #3: an unknown/version-skewed
+    token must raise, never silently match zero chunks via a PascalCase fallback)."""
+    if not element:
+        return None
+    lbl = element_label(element)
+    if lbl is None:
+        raise InvalidEnumError(
+            f"unknown element {element!r} — not in the registered schema "
+            f"({sorted(valid_element_values())}). Load a schema pack "
+            "(e.g. kglite_docs.schemas.load_schema('legal')) first."
+        )
+    return lbl
 
 
 # ─── studies ────────────────────────────────────────────────────────────────
@@ -570,6 +588,7 @@ def ledger(
     verified_only: bool = False,
     doc_id: str | None = None,
     section_id: str | None = None,
+    element: str | None = None,
     include_superseded: bool = False,
     limit: int = 200,
 ) -> dict[str, Any]:
@@ -591,6 +610,7 @@ def ledger(
     ))
     if not meta:
         raise InvalidEnumError(f"study not found: {study_id}")
+    el_label = _element_label_or_raise(element)
 
     label_parts = ""
     if stance:
@@ -640,6 +660,9 @@ def ledger(
     total_rows = _df_dicts(store.cypher(base + "RETURN count(latest) AS n", params=params))
     total = int(total_rows[0]["n"]) if total_rows else 0
 
+    # Advisory element rank: in-scope element rows sort first, then by weight —
+    # the full current ledger is still returned, only reordered.
+    rank_prefix = f"CASE WHEN c:{el_label} THEN 0 ELSE 1 END, " if el_label else ""
     df = store.cypher(
         base + "RETURN latest.id AS assessment_id, c.id AS chunk_id, c.doc_id AS doc_id, "
         "c.page_number AS page, latest.stance AS stance, latest.weight AS weight, "
@@ -647,7 +670,7 @@ def ledger(
         "latest.quote AS quote, latest.char_start AS char_start, "
         "latest.char_end AS char_end, "
         "labels(latest) AS labels, c.text AS text "
-        "ORDER BY weight DESC LIMIT $lim",
+        f"ORDER BY {rank_prefix}weight DESC LIMIT $lim",
         params=params,
     )
     rows = _df_dicts(df)
@@ -757,17 +780,25 @@ def next_unassessed(
     study_id: str,
     doc_id: str | None = None,
     section_id: str | None = None,
+    element: str | None = None,
     agent_id: str | None = None,
     limit: int = 20,
     ttl_seconds: int = CLAIM_TTL_SECONDS,
 ) -> list[dict[str, Any]]:
-    """The work-list of chunks not yet assessed for this study, in reading
-    order.
+    """The work-list of chunks not yet assessed for this study, in reading order.
 
     **Punchcard semantics.** When `agent_id` is given, this atomically
     *claims* the returned chunks for that agent (a "checkout"), excluding any
     chunks already claimed by someone else — so parallel analysts never
     overlap. Without `agent_id` it's a read-only preview (no claim).
+
+    `element` is an **advisory** scope (a registered element type, e.g. from the
+    legal pack): the full work-list is still returned, but chunks classified as
+    that element sort *first*, then other classified chunks, then unclassified —
+    so an analyst reads the relevant subset first and can stop early **without**
+    anything being silently hidden (element labels are predictions, not ground
+    truth). An unknown element raises. `doc_id`/`section_id` remain hard
+    (ground-truth) filters.
 
     Claims auto-expire after `ttl_seconds` (default 30 min) so an analyst that
     pulls but never assesses doesn't lock chunks forever; assessing a chunk
@@ -776,6 +807,7 @@ def next_unassessed(
     """
     if not _study_exists(store, study_id):
         raise InvalidEnumError(f"study not found: {study_id}")
+    el_label = _element_label_or_raise(element)
 
     chunk_where = ["c.status = 'ready'"]
     base_params: dict[str, Any] = {"sid": study_id, "lim": int(limit)}
@@ -797,11 +829,21 @@ def next_unassessed(
         "AND NOT EXISTS { MATCH (c)<-[:USED_CONTEXT]-(:Assessment)-[:OF_STUDY]->(:Study {id: $sid}) }"
     )
 
+    # Advisory element rank: in-scope first, other-classified next, unclassified
+    # last — the full list is still returned (nothing hidden), only reordered.
+    order_by = DEFAULT_ORDER
+    if el_label:
+        order_by = (
+            f"ORDER BY CASE WHEN c:{el_label} THEN 0 WHEN c:Classified THEN 1 ELSE 2 END, "
+            "c.doc_id, c.page_number, c.chunk_index LIMIT $lim"
+        )
+
     # Claim (agent_id) or preview, via the shared punchcard — keyed on the study
     # id so study claims stay disjoint from the classification work-list.
     return claim_or_preview(
         store, where_sql=where_sql, not_done=not_done, base_params=base_params,
-        checkout_key=study_id, agent_id=agent_id, ttl_seconds=ttl_seconds,
+        checkout_key=study_id, agent_id=agent_id, order_by=order_by,
+        ttl_seconds=ttl_seconds,
     )
 
 

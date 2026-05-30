@@ -91,6 +91,41 @@ def test_punchcard_no_overlap_and_disjoint_from_study(corpus: Corpus, tmp_path: 
     assert len(corpus.next_unassessed(sid, agent_id="s1", limit=3)) == 3
 
 
+def test_study_element_scope_is_advisory_rank_first(corpus: Corpus, tmp_path: Path) -> None:
+    """Phase 4: `element=` reorders the work-list (in-scope first) but never
+    hides a chunk — element labels are predictions, not ground truth."""
+    ch = _ingest(corpus, tmp_path, n=4)
+    # ch[2] is the only :Alpha; the rest classified other / unclassified.
+    classify.classify_chunk(corpus.store, chunk_id=ch[0], elements=["beta"], agent_id="cl")
+    classify.classify_chunk(corpus.store, chunk_id=ch[1], elements=[], agent_id="cl")  # unclassified
+    classify.classify_chunk(corpus.store, chunk_id=ch[2], elements=["alpha"], agent_id="cl")
+    # ch[3] left with no classify marker (not yet classified)
+
+    sid = corpus.define_study("Q", created_by="lead")
+    work = corpus.next_unassessed(sid, element="alpha", limit=100)  # preview, no claim
+    ids = [r["id"] for r in work]
+    assert set(ids) == set(ch)              # FULL list — nothing hidden (advisory)
+    assert ids[0] == ch[2]                  # the :Alpha chunk ranks first
+    # unclassified / not-yet sort to the tail
+    assert ids[-1] in (ch[1], ch[3])
+
+    # Unknown element raises (never a silent zero-match).
+    with pytest.raises(InvalidEnumError, match="unknown element"):
+        corpus.next_unassessed(sid, element="not_a_real_element")
+
+
+def test_ledger_element_rank_first(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest(corpus, tmp_path, n=3)
+    classify.classify_chunk(corpus.store, chunk_id=ch[1], elements=["alpha"], agent_id="cl")
+    sid = corpus.define_study("Q", created_by="lead")
+    # Higher weight on a non-alpha chunk; element rank must float the alpha row up.
+    corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1")
+    corpus.assess(sid, ch[1], stance="supports", weight=0.4, agent_id="a1")
+    led = corpus.study_ledger(sid, element="alpha")
+    assert led["total"] == 2
+    assert led["rows"][0]["chunk_id"] == ch[1]   # in-scope element first despite lower weight
+
+
 def test_classify_many(corpus: Corpus, tmp_path: Path) -> None:
     ch = _ingest(corpus, tmp_path)
     res = classify.classify_many(corpus.store, items=[

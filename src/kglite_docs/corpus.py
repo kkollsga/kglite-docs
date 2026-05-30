@@ -1208,7 +1208,7 @@ class Corpus:
         self, study_id: str, *,
         stance: Stance | None = None, min_weight: float | None = None,
         verified_only: bool = False, doc_id: str | None = None,
-        section_id: str | None = None,
+        section_id: str | None = None, element: str | None = None,
         include_superseded: bool = False, limit: int = 200,
     ) -> Ledger:
         """Weight-ranked evidence ledger for a study + support/against tallies.
@@ -1221,7 +1221,7 @@ class Corpus:
         return cast(Ledger, study_mod.ledger(
             self._store, study_id=study_id, stance=stance,
             min_weight=min_weight, verified_only=verified_only,
-            doc_id=doc_id, section_id=section_id,
+            doc_id=doc_id, section_id=section_id, element=element,
             include_superseded=include_superseded, limit=limit,
         ))
 
@@ -1268,17 +1268,21 @@ class Corpus:
     def next_unassessed(
         self, study_id: str, *,
         doc_id: str | None = None, section_id: str | None = None,
+        element: str | None = None,
         agent_id: str | None = None, limit: int = 20,
         ttl_seconds: int = 1800,
     ) -> list[dict[str, Any]]:
         """Work-list of chunks not yet assessed for this study. When
         ``agent_id`` is given, atomically *claims* (checks out) the returned
         chunks so parallel analysts don't overlap; without it, a read-only
-        preview. `doc_id`/`section_id` scope the work-list. Claims auto-expire
+        preview. `doc_id`/`section_id` scope the work-list (hard filters);
+        `element` is an **advisory** scope — chunks classified as that registered
+        element type sort first (the full list is still returned, nothing hidden),
+        so a study reads its subset first without re-scanning. Claims auto-expire
         after ``ttl_seconds``."""
         return study_mod.next_unassessed(
             self._store, study_id=study_id, doc_id=doc_id, section_id=section_id,
-            agent_id=agent_id, limit=limit, ttl_seconds=ttl_seconds,
+            element=element, agent_id=agent_id, limit=limit, ttl_seconds=ttl_seconds,
         )
 
     def reopen_study(self, study_id: str, *, agent_id: str) -> dict[str, Any]:

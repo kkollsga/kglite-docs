@@ -39,6 +39,17 @@ breaking changes (called out below).
   legal term (boundary principle intact). Multi-label, jurisdiction-neutral
   (common + civil law; illustrative PT/PROJUDI mappings). A classified corpus then
   routes by label predicate: `MATCH (c:Chunk:JudgeRemark)`.
+- **Advisory element scoping on studies (`element=` on `next_unassessed` /
+  `study_ledger`).** Once a corpus is classified, a study can scope to an element
+  type so it reads its relevant subset first instead of re-scanning the whole
+  corpus — the multi-study win. It is **advisory, never lossy**: the *full*
+  work-list/ledger is still returned, only **reordered** (in-scope element chunks
+  first, then other-classified, then unclassified/not-yet last), so an analyst
+  stops early as a *visible* choice and a misclassified chunk is deprioritized,
+  never hidden (element labels are predictions, not ground truth like
+  `doc_id`/`section_id`). An unknown/unregistered `element=` **raises**
+  (`InvalidEnumError`) rather than silently matching zero chunks. (Hard-exclude is
+  a deferred, audit-gated follow-up.)
 
 ## [0.0.11] — 2026-05-30
 
