@@ -102,6 +102,7 @@ def ingest_document(
     metadata: dict[str, object] | None = None,
     format: str | None = None,
     embed: bool = False,
+    structure_aware: bool = False,
 ) -> IngestResult:
     """Ingest any supported document format (PDF, DOCX, PPTX, MD, HTML,
     TXT, images). Format is auto-detected from the extension; pass
@@ -196,7 +197,7 @@ def ingest_document(
             placeholder = Chunk(chunk_index=0, text="", token_count=0, headings=[])
             all_chunks.append((CHUNK_STATUS_EMPTY, placeholder, p))
             continue
-        for ch in chunk_page(p.markdown):
+        for ch in chunk_page(p.markdown, structure_aware=structure_aware):
             all_chunks.append((CHUNK_STATUS_READY, ch, p))
 
     # Insert Chunks

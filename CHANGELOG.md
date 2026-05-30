@@ -8,6 +8,13 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — document structure
+- **Structure-aware chunking (FEAT-10).** `ingest(..., structure_aware=True)` (and
+  `document("ingest", structure_aware=True)`) starts a fresh chunk at every
+  top-level heading and never packs — or overlaps — across one, so a chunk never
+  straddles two sections and its heading attribution is exact. Size-based
+  splitting within a section is unchanged (the token target is still honored).
+  Opt-in and additive — the default packs greedily exactly as before; pairs with
+  Section nodes (cleaner section boundaries) and pinpoint cites.
 - **Pinpoint spans on assessments (FEAT-6).** `assess` takes an optional
   `quote` and/or `char_start`/`char_end` — the exact passage an assessment rests
   on — validated against the chunk text (an out-of-range span or a quote not

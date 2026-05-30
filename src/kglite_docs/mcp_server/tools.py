@@ -47,6 +47,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         source_uri: str | None = None,
         recursive: bool = True,
         embed: bool = False,
+        structure_aware: bool = False,
         batch_size: int = 64,
         filters: dict[str, Any] | None = None,
         limit: int = 100,
@@ -72,6 +73,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           opt-in** — by default ingest does NOT embed (fast, no model
           load); it returns a `hint` to run `index` next. Pass
           `embed=True` to embed inline in one shot. Idempotent on sha256.
+          Pass `structure_aware=True` to start a fresh chunk at every
+          top-level heading (cleaner section boundaries; default packs greedily).
         - **`index`** — embed ready-but-unembedded chunks so `search`
           works. Run after `ingest` (the two-phase flow). **Bounded per
           call** (≈30s wall-clock budget) so a big corpus never blocks
@@ -117,7 +120,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                     "document('ingest'): pass exactly one of path, directory, text",
                 )
             if directory is not None:
-                results = corpus.ingest_dir(directory, recursive=recursive, embed=embed)
+                results = corpus.ingest_dir(
+                    directory, recursive=recursive, embed=embed,
+                    structure_aware=structure_aware,
+                )
                 _persist(corpus)
                 pending = corpus.count_unembedded()
                 out: dict[str, Any] = {
@@ -142,10 +148,14 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                     raise ValueError(
                         "document('ingest', text=...): title is required",
                     )
-                r = corpus.ingest(text=text, title=title, format=format or "md", embed=embed)
+                r = corpus.ingest(
+                    text=text, title=title, format=format or "md", embed=embed,
+                    structure_aware=structure_aware,
+                )
             else:
                 r = corpus.ingest(
-                    path, title=title, format=format, source_uri=source_uri, embed=embed,
+                    path, title=title, format=format, source_uri=source_uri,
+                    embed=embed, structure_aware=structure_aware,
                 )
             _persist(corpus)
             res = {

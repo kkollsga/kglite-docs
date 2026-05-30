@@ -69,6 +69,7 @@ def chunk_page(
     target_tokens: int = DEFAULT_TARGET_TOKENS,
     overlap_tokens: int = DEFAULT_OVERLAP_TOKENS,
     initial_headings: list[str] | None = None,
+    structure_aware: bool = False,
     tokenizer: Tokenizer | None = None,
 ) -> list[Chunk]:
     """Greedy paragraph packer.
@@ -87,6 +88,12 @@ def chunk_page(
     4. Heading lines themselves are *not* emitted as standalone chunks;
        they update the heading stack inherited by subsequent chunks.
 
+    With ``structure_aware=True``, a chunk is never packed (or overlapped)
+    across a **top-level heading** boundary: when the top-level heading
+    changes, the current chunk is flushed and the new section starts fresh.
+    Size-based splitting within a section is unchanged, so the token target
+    is still honored. Default (``False``) preserves the original behavior.
+
     Returns one `Chunk` per chunk emitted; an empty input returns `[]`.
     """
     if not markdown.strip():
@@ -99,6 +106,10 @@ def chunk_page(
     buf_tokens = 0
     chunk_idx = 0
     pending_overlap: str = ""
+    # Heading snapshot for the content *currently buffered* — used when
+    # structure_aware so a boundary flush attributes the buffer to the section
+    # it came from (the live `heading_stack` has already advanced by then).
+    buf_headings: list[str] = list(heading_stack)
 
     def emit() -> None:
         nonlocal buf, buf_tokens, chunk_idx, pending_overlap
@@ -114,7 +125,7 @@ def chunk_page(
                 chunk_index=chunk_idx,
                 text=text,
                 token_count=count_tokens(text, tok),
-                headings=list(heading_stack),
+                headings=list(buf_headings if structure_aware else heading_stack),
             )
         )
         chunk_idx += 1
@@ -131,9 +142,20 @@ def chunk_page(
         buf_tokens = 0
 
     # Iterate paragraphs while tracking heading stack
+    prev_top: str | None = heading_stack[0] if heading_stack else None
     for para in _iter_paragraphs(markdown, heading_stack):
         if not para.strip():
             continue
+        if structure_aware:
+            # Flush at a top-level heading boundary; don't bleed the prior
+            # section's overlap into the new one.
+            cur_top = heading_stack[0] if heading_stack else None
+            if buf and cur_top != prev_top:
+                emit()
+                pending_overlap = ""
+            prev_top = cur_top
+        if structure_aware and not buf:
+            buf_headings = list(heading_stack)
         para_tokens = count_tokens(para, tok)
         if para_tokens > target_tokens:
             # Oversized paragraph: split further

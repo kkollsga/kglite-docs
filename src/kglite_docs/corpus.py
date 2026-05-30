@@ -185,6 +185,7 @@ class Corpus:
         metadata: dict[str, object] | None = None,
         format: str | None = None,
         embed: bool = False,
+        structure_aware: bool = False,
     ) -> IngestResult:
         """Ingest a document. Three modes:
 
@@ -201,6 +202,10 @@ class Corpus:
         afterwards (or pass ``embed=True`` here) to compute vectors and
         enable :meth:`search`. Non-semantic workflows (browse, cypher,
         tag, review, OCR, export, translate) need no embeddings at all.
+
+        With ``structure_aware=True`` chunking starts a fresh chunk at every
+        top-level heading (never packing or overlapping across one) — cleaner
+        Section boundaries and pinpoint cites; the default packs greedily.
 
         Returns an :class:`IngestResult` with the assigned ``doc_id``
         (sha256 of file or text bytes), chunk count, OCR-pending page
@@ -229,13 +234,14 @@ class Corpus:
                     self._store, self._embedder, tmp_path,
                     title=title, source_uri=source_uri or "",
                     metadata=metadata, format=fmt, embed=embed,
+                    structure_aware=structure_aware,
                 )
             finally:
                 tmp_path.unlink(missing_ok=True)
         return _ingest_doc(
             self._store, self._embedder, path,  # type: ignore[arg-type]
             title=title, source_uri=source_uri, metadata=metadata,
-            format=format, embed=embed,
+            format=format, embed=embed, structure_aware=structure_aware,
         )
 
     def ingest_dir(
@@ -245,6 +251,7 @@ class Corpus:
         recursive: bool = True,
         patterns: list[str] | None = None,
         embed: bool = False,
+        structure_aware: bool = False,
     ) -> list[IngestResult]:
         """Ingest every supported file under ``directory``. By default
         scans for all known formats: PDF, DOCX, PPTX, MD, HTML, TXT, and
@@ -266,7 +273,7 @@ class Corpus:
                     continue
                 seen.add(f)
                 try:
-                    results.append(self.ingest(f, embed=embed))
+                    results.append(self.ingest(f, embed=embed, structure_aware=structure_aware))
                 except Exception as exc:
                     import logging
                     logging.getLogger("kglite_docs").warning(
