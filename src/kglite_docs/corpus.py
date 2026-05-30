@@ -960,6 +960,17 @@ class Corpus:
             include_images=include_images, dpi=dpi,
         ))
 
+    def submit_ocr_many(
+        self, rows: list[dict[str, Any]], *, agent_id: str = "ocr", model: str = "",
+    ) -> dict[str, Any]:
+        """Submit many pages' OCR at once (each row `{page_id, markdown}` or
+        `{page_id, tiles}`). `rows` is a structured argument the SDK escapes — so
+        agents don't hand-serialize multi-line verbatim text into a fragile JSON
+        file. A failing row is reported, not fatal."""
+        return ocr_mod.submit_ocr_many(
+            self._store, self._embedder, rows=rows, agent_id=agent_id, model=model,
+        )
+
     def export_ocr(self, doc_id: str, *, out_path: str | None = None) -> dict[str, Any]:
         """Write a document's OCR to a sidecar JSON (`<source>.ocr.json`) —
         portable, auditable, hand-correctable, re-importable. Carries each page's

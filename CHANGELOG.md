@@ -7,6 +7,13 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — library-owned batch OCR submit
+- **`ocr("submit_many", rows=[{page_id, markdown}|{page_id, tiles}])`** submits
+  many pages in one call. `rows` is a **structured tool argument** (the SDK
+  escapes it), so agents never hand-serialize multi-line, quote-heavy verbatim
+  transcriptions into a JSON file — the failure mode that silently corrupted
+  ~half a batch in the field run. A failing row is reported, not fatal.
+
 ### Added — OCR model guidance
 - The `request_ocr` task now carries a `recommended_model` (`claude-sonnet-4-6`)
   + `model_guidance`, and `_INSTRUCTIONS` documents the tier: **Sonnet** default,

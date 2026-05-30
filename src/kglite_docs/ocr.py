@@ -557,3 +557,37 @@ def submit_ocr(
         "agent_id": agent_id, "model": model,
         "ocr_outcome": outcome, "legible_chars": legible,
     }
+
+
+def submit_ocr_many(
+    store: Store, embedder: Any, *, rows: list[dict[str, Any]],
+    agent_id: str = "ocr", model: str = "",
+) -> dict[str, Any]:
+    """Submit many pages' OCR in one call. Each row is
+    `{page_id, markdown}` or `{page_id, tiles:[…]}` (+ optional per-row
+    `agent_id`/`model`/`confidence`). `rows` is a **structured argument** — the
+    MCP/SDK layer escapes it — so an agent never hand-serializes multi-line,
+    quote-heavy verbatim transcriptions into a JSON file (which silently corrupts
+    on the very content this tool handles). A failing row is reported, not fatal."""
+    results: list[dict[str, Any]] = []
+    for rec in rows:
+        pid = rec.get("page_id")
+        if not pid:
+            results.append({"error": "missing page_id", "record": rec})
+            continue
+        try:
+            results.append(submit_ocr(
+                store, embedder, page_id=str(pid),
+                markdown=str(rec.get("markdown") or ""),
+                agent_id=str(rec.get("agent_id") or agent_id),
+                model=str(rec.get("model") or model),
+                confidence=rec.get("confidence"),
+                tiles=rec.get("tiles"),
+            ))
+        except Exception as exc:  # one bad row mustn't sink the batch
+            results.append({"page_id": pid, "error": str(exc)})
+    return {
+        "submitted": sum(1 for r in results if "error" not in r),
+        "failed": sum(1 for r in results if "error" in r),
+        "results": results,
+    }

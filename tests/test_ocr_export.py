@@ -64,6 +64,23 @@ def test_export_then_import_round_trips(corpus: Corpus, tmp_path: Path) -> None:
     assert corpus.ocr_status()["readable_pages"] == 1
 
 
+def test_submit_ocr_many_structured(corpus: Corpus, tmp_path: Path) -> None:
+    _scan(tmp_path / "a.pdf")
+    _scan(tmp_path / "b.pdf")
+    corpus.ingest(tmp_path / "a.pdf")
+    corpus.ingest(tmp_path / "b.pdf")
+    pids = [p["page_id"] for p in corpus.list_pending_ocr(include_images=False)]
+    # Multi-line, quote-heavy verbatim text as a structured arg (no hand-rolled JSON).
+    res = corpus.submit_ocr_many([
+        {"page_id": pids[0], "markdown": 'He said "I admit it."\nNova linha: "Sim".\n'
+         + ("The party is liable for the amount. " * 6)},
+        {"page_id": pids[1], "markdown": "# Order\n\n" + ("Costs assessed against the appellant. " * 6)},
+        {"page_id": "page_missing", "markdown": "x"},  # a bad row must not sink the batch
+    ], agent_id="sonnet")
+    assert res["submitted"] == 2 and res["failed"] == 1
+    assert corpus.ocr_status()["readable_pages"] == 2
+
+
 def test_import_requires_ingested_doc(corpus: Corpus, tmp_path: Path) -> None:
     sidecar = tmp_path / "x.ocr.json"
     sidecar.write_text(json.dumps({"doc_id": "doc_missing", "pages": [
