@@ -476,6 +476,56 @@ def test_conflicts_unknown_study_raises(corpus: Corpus, tmp_path: Path) -> None:
         corpus.study_conflicts("nope")
 
 
+def _chunk_text(corpus: Corpus, chunk_id: str) -> str:
+    return corpus.cypher(
+        "MATCH (c:Chunk {id: $id}) RETURN c.text AS t", params={"id": chunk_id}
+    ).to_list()[0]["t"]
+
+
+def test_pinpoint_span_offsets_round_trip(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-6: a char span is stored and surfaced per ledger row."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    text = _chunk_text(corpus, ch[0])
+    quote = text[5:25]
+    corpus.assess(sid, ch[0], stance="supports", weight=0.9, agent_id="a1",
+                  char_start=5, char_end=25)
+    row = corpus.study_ledger(sid)["rows"][0]
+    assert row["char_start"] == 5 and row["char_end"] == 25
+    assert row["quote"] == quote          # filled from the cited text
+
+
+def test_pinpoint_quote_only_is_located(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    text = _chunk_text(corpus, ch[0])
+    quote = text[10:30]
+    corpus.assess(sid, ch[0], stance="against", weight=0.5, agent_id="a1", quote=quote)
+    row = corpus.study_ledger(sid)["rows"][0]
+    assert row["quote"] == quote
+    assert text[row["char_start"]:row["char_end"]] == quote
+
+
+def test_pinpoint_no_span_defaults(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="neutral", weight=0.1, agent_id="a1")
+    row = corpus.study_ledger(sid)["rows"][0]
+    assert row["quote"] == "" and row["char_start"] == -1 and row["char_end"] == -1
+
+
+def test_pinpoint_span_validation(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    n = len(_chunk_text(corpus, ch[0]))
+    with pytest.raises(InvalidEnumError):       # out of range
+        corpus.assess(sid, ch[0], stance="supports", weight=0.5, agent_id="a1",
+                      char_start=0, char_end=n + 50)
+    with pytest.raises(InvalidEnumError):       # quote not in chunk
+        corpus.assess(sid, ch[0], stance="supports", weight=0.5, agent_id="a1",
+                      quote="this phrase is definitely not present in the chunk zzz")
+
+
 def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
     """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
     ch = _ingest_chunks(corpus, tmp_path)

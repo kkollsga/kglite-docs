@@ -1112,6 +1112,7 @@ class Corpus:
         stance: Stance, weight: float, agent_id: str,
         rationale: str = "", model: str = "",
         provenance: Provenance = "primary_text",
+        quote: str = "", char_start: int | None = None, char_end: int | None = None,
         context_chunk_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Record stance (supports/against/neutral/deferred) + probative weight
@@ -1124,6 +1125,10 @@ class Corpus:
         (a paraphrase/summary), or `scanned_unread` (an unread scan; provisional).
         Surfaced per row in `study_ledger`.
 
+        `quote`/`char_start`/`char_end` are an optional pinpoint span — the exact
+        passage the call rests on, surfaced in the ledger for pinpoint cites.
+        Validated against the chunk text (out-of-range / quote-not-found rejected).
+
         `context_chunk_ids`: neighbor chunks read to interpret the focal one;
         recorded so retrieval pulls the span and they're excluded from the
         work-list (no double-judging)."""
@@ -1131,6 +1136,7 @@ class Corpus:
             self._store, study_id=study_id, chunk_id=chunk_id,
             stance=stance, weight=weight, rationale=rationale,
             agent_id=agent_id, model=model, provenance=provenance,
+            quote=quote, char_start=char_start, char_end=char_end,
             context_chunk_ids=context_chunk_ids,
         )
 

@@ -8,6 +8,13 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — document structure
+- **Pinpoint spans on assessments (FEAT-6).** `assess` takes an optional
+  `quote` and/or `char_start`/`char_end` — the exact passage an assessment rests
+  on — validated against the chunk text (an out-of-range span or a quote not
+  found in the chunk is rejected; `quote` alone is located to derive offsets).
+  Surfaced per row in `study_ledger` (`quote`/`char_start`/`char_end`), so the
+  evidence record carries pinpoint cites instead of just "somewhere in this
+  chunk." Backward-compatible: rows without a span read back as `""`/`-1`.
 - **`Section` nodes + section-scoped studies (FEAT-9).** Ingest now derives
   `Section` nodes — the grain between document and chunk — from the PDF outline
   (`doc.get_toc()`) when present, else from top-level heading boundaries (generic,

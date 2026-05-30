@@ -41,6 +41,7 @@ from kglite_docs.schema import (
     CHECKED_OUT,
     CHECKOUT,
     CHUNK,
+    CHUNK_TEXT_COL,
     CLAIM_TTL_SECONDS,
     HAS_VERIFICATION,
     HOLDS,
@@ -265,10 +266,19 @@ def assess(
     agent_id: str,
     model: str = "",
     provenance: str = PROVENANCE_DEFAULT,
+    quote: str = "",
+    char_start: int | None = None,
+    char_end: int | None = None,
     context_chunk_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Record one agent's stance + probative weight + rationale on a chunk,
     toward a study's question. Append-only (latest wins). Never embeds.
+
+    `quote`/`char_start`/`char_end` are an optional **pinpoint span** — the exact
+    passage the assessment rests on, surfaced in the ledger for pinpoint cites.
+    Pass `quote` alone (located in the chunk) or `char_start`+`char_end` (validated
+    against the chunk length; if `quote` is also given it must match the cited
+    text). An out-of-range span or a quote not found in the chunk is rejected.
 
     `stance` is one of supports / against / neutral / deferred. Use `deferred`
     when the chunk was read but can't be judged yet (e.g. an image-only /
@@ -297,6 +307,7 @@ def assess(
         raise InvalidEnumError(f"weight must be in [0,1] (got {weight})")
     if not _study_exists(store, study_id):
         raise InvalidEnumError(f"study not found: {study_id}")
+    quote, span_start, span_end = _resolve_span(store, chunk_id, quote, char_start, char_end)
 
     register_agent(store, agent_id=agent_id)
     aid = "assess_" + uuid.uuid4().hex[:16]
@@ -311,6 +322,9 @@ def assess(
             "weight": weight,
             "provenance": provenance,
             "rationale": rationale,
+            "quote": quote,
+            "char_start": span_start,
+            "char_end": span_end,
             "by_agent": agent_id,
             "model": model,
             "created_at": _now(),
@@ -349,6 +363,7 @@ def assess(
     return {
         "assessment_id": aid, "study_id": study_id, "chunk_id": chunk_id,
         "stance": stance, "weight": weight, "provenance": provenance,
+        "quote": quote, "char_start": span_start, "char_end": span_end,
         "context_chunk_ids": ctx,
     }
 
@@ -553,6 +568,8 @@ def ledger(
         base + "RETURN latest.id AS assessment_id, c.id AS chunk_id, c.doc_id AS doc_id, "
         "c.page_number AS page, latest.stance AS stance, latest.weight AS weight, "
         "latest.rationale AS rationale, latest.by_agent AS by_agent, "
+        "latest.quote AS quote, latest.char_start AS char_start, "
+        "latest.char_end AS char_end, "
         "labels(latest) AS labels, c.text AS text "
         "ORDER BY weight DESC LIMIT $lim",
         params=params,
@@ -563,6 +580,10 @@ def ledger(
         r["verification_status"] = _verification_from_labels(node_labels)
         r["provenance"] = _provenance_from_labels(node_labels)
         r["superseded"] = r["assessment_id"] in superseded_ids
+        # Normalize pinpoint span for pre-FEAT-6 rows (null → unset).
+        r["quote"] = r.get("quote") or ""
+        r["char_start"] = cs if isinstance(cs := r.get("char_start"), int) else -1
+        r["char_end"] = ce if isinstance(ce := r.get("char_end"), int) else -1
     # Attach each row's USED_CONTEXT span (the neighbor chunks the agent read
     # to judge it) so retrieval can pull the full relevant span.
     ids = [r["assessment_id"] for r in rows if r.get("assessment_id")]
@@ -755,6 +776,43 @@ def _study_exists(store: Store, study_id: str) -> bool:
         "MATCH (s:Study {id: $id}) RETURN s.id AS id", params={"id": study_id},
     ))
     return bool(df)
+
+
+def _chunk_text(store: Store, chunk_id: str) -> str | None:
+    rows = _df_dicts(store.cypher(
+        f"MATCH (c:Chunk {{id: $id}}) RETURN c.{CHUNK_TEXT_COL} AS text",
+        params={"id": chunk_id},
+    ))
+    return rows[0]["text"] if rows else None
+
+
+def _resolve_span(
+    store: Store, chunk_id: str, quote: str,
+    char_start: int | None, char_end: int | None,
+) -> tuple[str, int, int]:
+    """Validate/locate a pinpoint span (FEAT-6) against the chunk text. Returns
+    `(quote, char_start, char_end)` with `-1` for unset offsets. Honest cites:
+    an out-of-range span or a quote not found in the chunk is rejected."""
+    if not quote and char_start is None and char_end is None:
+        return "", -1, -1
+    text = _chunk_text(store, chunk_id)
+    if text is None:
+        raise InvalidEnumError(f"chunk not found: {chunk_id}")
+    n = len(text)
+    if char_start is not None or char_end is not None:
+        if char_start is None or char_end is None:
+            raise InvalidEnumError("char_start and char_end must be given together")
+        if not (0 <= char_start <= char_end <= n):
+            raise InvalidEnumError(
+                f"span [{char_start}, {char_end}] out of range for chunk of length {n}"
+            )
+        if quote and text[char_start:char_end] != quote:
+            raise InvalidEnumError("quote does not match the text at [char_start, char_end]")
+        return (quote or text[char_start:char_end]), char_start, char_end
+    idx = text.find(quote)
+    if idx < 0:
+        raise InvalidEnumError("quote not found in the chunk text")
+    return quote, idx, idx + len(quote)
 
 
 def _superseded_ids(store: Store, study_id: str) -> set[str]:

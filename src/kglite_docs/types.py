@@ -448,6 +448,9 @@ class AssessmentRow(TypedDict, total=False):
     weight: float
     provenance: Provenance
     rationale: str
+    quote: str
+    char_start: int
+    char_end: int
     by_agent: str
     verification_status: AssessmentStatus
     superseded: bool

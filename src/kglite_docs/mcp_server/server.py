@@ -96,6 +96,8 @@ embeddings; iterate chunks via study("next"), so you can skip index):
           One first-class, verifiable record per chunk; re-assessing supersedes.
           `provenance` (optional, default primary_text) records what you actually
           checked — the ledger surfaces it so unread/paraphrase-based calls show.
+          Optional `quote`/`char_start`/`char_end` pin the exact passage (a
+          pinpoint cite), validated against the chunk text.
   3. study("ledger", study_id=sid)            — weight-ranked evidence + tallies
      study("ledger", study_id=sid, stance="supports")   — just the supporting side
      — current-by-default: corrected assessments are hidden; pass

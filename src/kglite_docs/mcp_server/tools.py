@@ -801,6 +801,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         stance: str | None = None,
         weight: float | None = None,
         provenance: str | None = None,
+        quote: str = "",
+        char_start: int | None = None,
+        char_end: int | None = None,
         rationale: str = "",
         context_chunk_ids: list[str] | None = None,
         agent_id: str | None = None,
@@ -840,7 +843,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `model`, **`provenance`** (what you actually checked, surfaced per row
           in the ledger: `primary_text` = read the source [default],
           `characterization` = a paraphrase/summary, `scanned_unread` = an unread
-          scan [provisional]), and **`context_chunk_ids`** — neighbor chunks you
+          scan [provisional]), an optional **pinpoint span** — `quote` (the exact
+          passage; located in the chunk) and/or `char_start`+`char_end`
+          (validated against the chunk text; surfaced in the ledger for pinpoint
+          cites), and **`context_chunk_ids`** — neighbor chunks you
           had to read to interpret this one (e.g. from `chunk("get", window=…)`).
           They're recorded so the ledger can pull the full span later and so
           they're excluded from the work-list (no one re-judges them).
@@ -918,6 +924,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 rationale=rationale,
                 agent_id=_require(agent_id, "agent_id", action, "study"),
                 model=model, provenance=provenance or "primary_text",
+                quote=quote, char_start=char_start, char_end=char_end,
                 context_chunk_ids=context_chunk_ids,
             )
             _persist(corpus)
