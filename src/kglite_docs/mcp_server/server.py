@@ -131,6 +131,10 @@ embeddings; iterate chunks via study("next"), so you can skip index):
        — REFUSES until step 5 ran (so you can't ship a confident-incomplete
          conclusion). Genuinely nothing to synthesize? pass
          acknowledge_no_synthesis=True to record an audited skip.
+  7. Write any long-form report INTO THE GRAPH, not as a .md file:
+     study("report", study_id=sid, name="client-brief", text="...# md...",
+           agent_id="lead")  — named + append-only versioned; export to disk only
+     on demand via study("export_report", ...). study("reports")/get_report read.
   Manage studies with study("list") / get / reopen / delete.
 
 MANY STUDIES ON ONE BIG CORPUS? CLASSIFY ONCE, ROUTE MANY. Re-reading a

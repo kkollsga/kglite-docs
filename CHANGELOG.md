@@ -7,6 +7,17 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — versioned study reports (on the graph, not `.md` litter)
+- **`study("report", name=…, text=…)`** saves a markdown report **on the study
+  node** — *named* (several distinct reports per study coexist) and *append-only
+  versioned* (each save is a new version; full history, latest-wins on read).
+  `study("reports")` lists names + versions; `study("get_report")` reads (latest
+  or a specific `version`); `study("export_report")` writes one to disk **on
+  demand** — so reports live in the `.kgl` (portable, diffable, queryable) and
+  agents stop cluttering the working folder with one-off files. A report can
+  record the `cites` (finding/assessment ids) it rests on; reports cascade-delete
+  with the study.
+
 ### Added — library-owned batch OCR submit
 - **`ocr("submit_many", rows=[{page_id, markdown}|{page_id, tiles}])`** submits
   many pages in one call. `rows` is a **structured tool argument** (the SDK

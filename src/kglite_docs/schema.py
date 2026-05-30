@@ -30,6 +30,7 @@ SYNTHESIS_EVENT: Final = "SynthesisEvent"  # a ledger-wide pattern pass (or its 
 REVIEW_ROUND: Final = "ReviewRound"  # one escalation pass (a level/kind/lens over a unit set)
 STUDY_RECOMMENDATION: Final = "StudyRecommendation"  # a proposed follow-on study (never auto-runs)
 EVENT: Final = "Event"  # a dated occurrence (actor/action/outcome) on the timeline
+REPORT: Final = "Report"  # a versioned markdown report attached to a study
 CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
 # Edge types
@@ -65,6 +66,7 @@ EXAMINED: Final = "EXAMINED"                  # ReviewRound → Chunk|Finding (t
 RECOMMENDS: Final = "RECOMMENDS"              # Study → StudyRecommendation
 SPAWNED_FROM: Final = "SPAWNED_FROM"          # Study(child) → Study(source) (approved follow-on)
 HAS_EVENT: Final = "HAS_EVENT"                # Document → Event (and Chunk → Event when chunk-anchored)
+HAS_REPORT: Final = "HAS_REPORT"              # Study → Report (versioned markdown report)
 
 # Punchcard lease: a checkout older than this is treated as abandoned and
 # its chunks become claimable again (and are GC'd on the next claim).

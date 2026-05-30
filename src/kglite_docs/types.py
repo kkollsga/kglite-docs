@@ -538,6 +538,18 @@ class FindingRow(TypedDict, total=False):
     review_events: list[dict[str, Any]]   # [{by, verdict, provenance, notes, at}, …]
 
 
+class ReportRow(TypedDict, total=False):
+    """A versioned study report from `Corpus.get_report()`."""
+
+    report_id: str
+    name: str
+    version: int
+    text: str
+    by_agent: str
+    cites: list[str]
+    created_at: str
+
+
 class ConflictRow(TypedDict, total=False):
     """One contested chunk — current `supports` vs `against` assessments."""
 
@@ -581,5 +593,5 @@ __all__ = [
     "TranslationStatus",
     "Stance", "Provenance", "AssessmentVerdict", "AssessmentStatus", "StudyStatus",
     "StudyRow", "AssessmentRow", "Ledger", "ConflictRow", "ConflictReport",
-    "FindingRow",
+    "FindingRow", "ReportRow",
 ]

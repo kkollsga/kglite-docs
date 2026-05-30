@@ -1550,6 +1550,44 @@ class Corpus:
         from kglite_docs import events as events_mod
         return events_mod.timeline_conflicts(self._store, doc_id=doc_id)
 
+    # ─── study reports (versioned markdown, on the graph) ──────────────────
+
+    def save_report(
+        self, study_id: str, *, name: str, text: str, agent_id: str,
+        cites: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Save a markdown report on a study (append-only versioned, named) — keep
+        reports on the graph, not as `.md` litter. Re-saving a name adds a version."""
+        from kglite_docs import reports as reports_mod
+        return reports_mod.save_report(
+            self._store, study_id=study_id, name=name, text=text,
+            agent_id=agent_id, cites=cites,
+        )
+
+    def list_reports(self, study_id: str) -> list[dict[str, Any]]:
+        """A study's reports — each name with its latest version + version count."""
+        from kglite_docs import reports as reports_mod
+        return reports_mod.list_reports(self._store, study_id=study_id)
+
+    def get_report(
+        self, study_id: str, *, name: str | None = None, version: int | None = None,
+    ) -> dict[str, Any] | None:
+        """A report's markdown — latest version by default; pass `version` for a
+        specific one, or omit `name` for the study's most recent report."""
+        from kglite_docs import reports as reports_mod
+        return reports_mod.get_report(self._store, study_id=study_id, name=name, version=version)
+
+    def export_report(
+        self, study_id: str, out_path: str, *, name: str | None = None,
+        version: int | None = None,
+    ) -> dict[str, Any]:
+        """Write a report's markdown to disk on demand (the only time a report
+        becomes a file)."""
+        from kglite_docs import reports as reports_mod
+        return reports_mod.export_report(
+            self._store, study_id=study_id, name=name, out_path=out_path, version=version,
+        )
+
     def list_findings(
         self, study_id: str, *, finding_type: str | None = None,
     ) -> list[dict[str, Any]]:

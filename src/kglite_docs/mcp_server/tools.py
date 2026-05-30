@@ -982,6 +982,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         target_confidence: float = 0.0,
         required_lenses: list[str] | None = None,
         max_rounds: int = 0,
+        name: str | None = None,
+        out_path: str | None = None,
+        version: int | None = None,
+        cites: list[str] | None = None,
         date: str | None = None,
         actor: str | None = None,
         event_action: str | None = None,
@@ -1130,6 +1134,16 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           treatment (same trigger → different outcome by actor) + contradictory
           outcomes. Requires `doc_id`; reports how many events were scanned.
         - **`event_prompt`** — the prompt for extracting timeline events.
+        - **`report`** — save a markdown **report** on the study (named,
+          append-only **versioned**) — keep reports on the graph, **don't write
+          `.md` files**. Requires `study_id`, `name`, `text`, `agent_id`; optional
+          `cites` (finding/assessment ids). Re-saving a name adds a version.
+        - **`reports`** — list the study's reports (name + latest version +
+          count). Requires `study_id`.
+        - **`get_report`** — a report's markdown (latest by default; `version` for
+          a specific one; omit `name` for the most recent). Requires `study_id`.
+        - **`export_report`** — write a report to disk on demand. Requires
+          `study_id`, `out_path`; optional `name`, `version`.
         - **`recommend`** — propose follow-on studies this study's findings imply
           (proposals only, never auto-run), each seeded with the triggering
           findings. Requires `study_id`.
@@ -1273,6 +1287,29 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         if action == "event_prompt":
             from kglite_docs.events import EVENT_EXTRACTION_PROMPT
             return {"prompt": EVENT_EXTRACTION_PROMPT}
+        if action == "report":
+            r = corpus.save_report(
+                _require(study_id, "study_id", action, "study"),
+                name=_require(name, "name", action, "study"),
+                text=_require(text, "text", action, "study"),
+                agent_id=_require(agent_id, "agent_id", action, "study"),
+                cites=cites,
+            )
+            _persist(corpus)
+            return r
+        if action == "reports":
+            return corpus.list_reports(_require(study_id, "study_id", action, "study"))
+        if action == "get_report":
+            return corpus.get_report(
+                _require(study_id, "study_id", action, "study"),
+                name=name, version=version,
+            )
+        if action == "export_report":
+            return corpus.export_report(
+                _require(study_id, "study_id", action, "study"),
+                _require(out_path, "out_path", action, "study"),
+                name=name, version=version,
+            )
         if action == "recommend":
             return corpus.recommend_studies(_require(study_id, "study_id", action, "study"))
         if action == "recommendations":
@@ -1386,6 +1423,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             "supersede, next, ledger, conflicts, semantic_conflicts, finding, "
             "findings, verify, synthesize, synthesis_prompt, escalate, next_review, "
             "record_review, close_round, rounds, lenses, confidence, set_policy, "
-            "add_event, timeline, timeline_conflicts, event_prompt, recommend, "
-            "recommendations, spawn, conclude, list, get, reopen, delete",
+            "add_event, timeline, timeline_conflicts, event_prompt, report, "
+            "reports, get_report, export_report, recommend, recommendations, "
+            "spawn, conclude, list, get, reopen, delete",
         )
