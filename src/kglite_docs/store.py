@@ -9,12 +9,30 @@ Centralising the conversion keeps the call sites readable.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 import kglite
 import pandas as pd
+
+from kglite_docs.errors import ConcurrencyError
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort check that `pid` is a live process on this host."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just not ours
+    except OSError:
+        return False
+    return True
 
 
 class Store:
@@ -23,6 +41,53 @@ class Store:
     def __init__(self, graph: kglite.KnowledgeGraph, path: Path | None = None) -> None:
         self.g = graph
         self.path = path
+        self._lock_path: Path | None = None
+        if path is not None:
+            self._acquire_lock(Path(path))
+
+    # ─── single-writer advisory lock ───────────────────────────────────────
+
+    def _acquire_lock(self, path: Path) -> None:
+        """Advisory single-writer lock on ``<path>.lock``. Raises
+        :class:`ConcurrencyError` if a *different* live process already owns it;
+        a same-process reopen (create→save→open) is allowed, and a stale lock
+        (dead PID) is reclaimed. Best-effort — a lock-file OSError never blocks
+        legitimate work."""
+        lock_path = Path(str(path) + ".lock")
+        pid = os.getpid()
+        try:
+            if lock_path.exists():
+                try:
+                    owner = int(lock_path.read_text().strip() or "0")
+                except (ValueError, OSError):
+                    owner = 0
+                if owner and owner != pid and _pid_alive(owner):
+                    raise ConcurrencyError(
+                        f"another process (pid {owner}) already holds the writer "
+                        f"lock on {path}. kglite-docs is single-writer — funnel "
+                        "writes through one process (e.g. the MCP server). If that "
+                        f"process is dead, delete {lock_path}."
+                    )
+            lock_path.write_text(str(pid))
+        except ConcurrencyError:
+            raise
+        except OSError:
+            return  # can't manage a lock file here — degrade to no lock
+        self._lock_path = lock_path
+
+    def close(self) -> None:
+        """Release the writer lock (if held by this process)."""
+        lp = self._lock_path
+        if lp is not None:
+            try:
+                if lp.exists() and lp.read_text().strip() == str(os.getpid()):
+                    lp.unlink()
+            except OSError:
+                pass
+            self._lock_path = None
+
+    def __del__(self) -> None:  # pragma: no cover - GC timing
+        self.close()
 
     # ─── construction ──────────────────────────────────────────────────────
 

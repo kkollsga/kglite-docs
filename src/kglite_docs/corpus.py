@@ -1147,6 +1147,13 @@ class Corpus:
             context_chunk_ids=context_chunk_ids,
         )
 
+    def assess_many(self, study_id: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Batch-assess many chunks in one validated, batched write (a single
+        persist through the MCP layer). Each row is a dict with
+        `chunk_id`/`stance`/`weight`/`agent_id` (+ the optional `assess` fields).
+        One bad row aborts the whole batch — nothing is written."""
+        return study_mod.assess_many(self._store, study_id=study_id, rows=rows)
+
     def supersede_assessment(
         self, old_id: str, *,
         stance: Stance, weight: float, agent_id: str,

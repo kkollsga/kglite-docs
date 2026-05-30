@@ -815,6 +815,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         char_start: int | None = None,
         char_end: int | None = None,
         rationale: str = "",
+        rows: list[dict[str, Any]] | None = None,
         context_chunk_ids: list[str] | None = None,
         agent_id: str | None = None,
         model: str = "",
@@ -861,6 +862,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           They're recorded so the ledger can pull the full span later and so
           they're excluded from the work-list (no one re-judges them).
           Append-only; never embeds.
+        - **`assess_many`** — batch version: one call, one validated write, one
+          persist. Requires `study_id` and `rows` — a list of dicts each with
+          `chunk_id`/`stance`/`weight`/`agent_id` (+ the same optionals as
+          `assess`). Prefer this for a fan-out of assessments. One bad row aborts
+          the whole batch (nothing written).
         - **`supersede`** — audit-preserving correction: record a new assessment
           that replaces an existing one. Requires `assessment_id` (the old one)
           plus the new `stance`/`weight`/`agent_id` (and optional `rationale`/
@@ -939,6 +945,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             )
             _persist(corpus)
             return r
+        if action == "assess_many":
+            r = corpus.assess_many(
+                _require(study_id, "study_id", action, "study"),
+                _require(rows, "rows", action, "study"),
+            )
+            _persist(corpus)
+            return r
         if action == "supersede":
             r = corpus.supersede_assessment(
                 _require(assessment_id, "assessment_id", action, "study"),
@@ -1004,6 +1017,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             _persist(corpus)
             return r
         raise ValueError(
-            f"study(): unknown action {action!r}. Valid: define, assess, supersede, "
-            "next, ledger, conflicts, verify, conclude, list, get, reopen, delete",
+            f"study(): unknown action {action!r}. Valid: define, assess, assess_many, "
+            "supersede, next, ledger, conflicts, verify, conclude, list, get, "
+            "reopen, delete",
         )

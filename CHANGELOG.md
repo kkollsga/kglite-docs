@@ -7,6 +7,21 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — scale & polish
+- **Single-writer guardrails (FEAT-12).** kglite-docs is single-writer; this
+  makes that safe and ergonomic:
+  - **Advisory lock.** Opening a `.kgl` while another *live* process already
+    holds it now raises `ConcurrencyError` (a PID-stamped `<db>.lock`) instead of
+    silently racing on save and corrupting. Same-process reopen (create → save →
+    open) is allowed and a stale lock from a dead process is reclaimed; in-memory
+    corpora take no lock.
+  - **`study("assess_many", rows=[…])` / `Corpus.assess_many()`** — assess a
+    fan-out of chunks in one validated, batched write (and a single persist
+    through the MCP layer) instead of N round-trips. All rows are validated
+    before any write, so one bad row aborts the batch with nothing written.
+  - **Docs:** a plain single-writer Concurrency section in `docs/architecture.md`
+    (fan out reads, funnel writes through one process).
+
 ## [0.0.9] — 2026-05-30
 
 Release theme: **document structure** — a middle grain between document and

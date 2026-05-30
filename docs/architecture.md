@@ -109,3 +109,27 @@ Read-only operations (`get_document`, `cypher_query`, `graph_overview`) don't re
 | `compose_context` | ~10ms + embed query | vector_search + Cypher join |
 
 See `docs/perf.md` (or the consolidated plan) for the bottleneck audit and future levers.
+
+## Concurrency — single-writer
+
+kglite-docs is **single-writer**: one process owns the `.kgl` file. "Parallel
+agents" means many `agent_id`s flowing through **one** writer (the long-lived MCP
+server), not many OS processes writing the same file — concurrent external
+writers race on save and can corrupt the graph.
+
+- **Fan out reads freely.** Any number of readers/processes can open a `.kgl`
+  for read-only queries.
+- **Funnel writes through one process.** Run a single MCP server (or one library
+  process) and let every agent write through it — each write is attributed to its
+  `agent_id`, and the reified-node model (Tagging / Assessment / ReviewEvent)
+  lets many agents annotate the same chunk without colliding.
+- **A second writer fails loudly.** Opening a `.kgl` while another *live* process
+  already holds it raises `ConcurrencyError` (an advisory `<db>.lock` carrying the
+  owner PID) instead of silently corrupting. A stale lock from a dead process is
+  reclaimed automatically; same-process reopen (create → save → open) is allowed.
+- **Batch a fan-out with `assess_many`.** For a burst of assessments, `study(
+  "assess_many", rows=[…])` does one validated, batched write and a single
+  persist instead of N round-trips.
+- **Punchcard caveat.** The `study("next", agent_id=…)` checkout is safe for
+  *sequential* separate processes (persisted claims), but not for truly
+  concurrent external writers — those still need to funnel through one process.

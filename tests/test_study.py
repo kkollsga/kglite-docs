@@ -526,6 +526,47 @@ def test_pinpoint_span_validation(corpus: Corpus, tmp_path: Path) -> None:
                       quote="this phrase is definitely not present in the chunk zzz")
 
 
+def test_assess_many_batches_one_write(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-12: a batch assess writes N assessments and round-trips through the
+    ledger (tallies, provenance, span included)."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    res = corpus.assess_many(sid, [
+        {"chunk_id": ch[0], "stance": "supports", "weight": 0.9, "agent_id": "a1"},
+        {"chunk_id": ch[1], "stance": "against", "weight": 0.6, "agent_id": "a1",
+         "provenance": "characterization"},
+        {"chunk_id": ch[2], "stance": "neutral", "weight": 0.2, "agent_id": "a2",
+         "char_start": 0, "char_end": 5},
+    ])
+    assert res["created"] == 3
+    led = corpus.study_ledger(sid)
+    assert led["total"] == 3
+    assert led["tallies"]["supports"] == 1 and led["tallies"]["against"] == 1
+    by_chunk = {r["chunk_id"]: r for r in led["rows"]}
+    assert by_chunk[ch[1]]["provenance"] == "characterization"
+    assert by_chunk[ch[2]]["char_start"] == 0 and by_chunk[ch[2]]["char_end"] == 5
+
+
+def test_assess_many_bad_row_writes_nothing(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    with pytest.raises(InvalidEnumError):
+        corpus.assess_many(sid, [
+            {"chunk_id": ch[0], "stance": "supports", "weight": 0.9, "agent_id": "a1"},
+            {"chunk_id": ch[1], "stance": "maybe", "weight": 0.5, "agent_id": "a1"},  # bad
+        ])
+    # Nothing was written — the whole batch aborted before any upsert.
+    assert corpus.study_ledger(sid)["total"] == 0
+
+
+def test_assess_many_empty_and_missing_field(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    assert corpus.assess_many(sid, [])["created"] == 0
+    with pytest.raises(InvalidEnumError):
+        corpus.assess_many(sid, [{"chunk_id": ch[0], "stance": "supports"}])  # no weight/agent
+
+
 def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
     """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
     ch = _ingest_chunks(corpus, tmp_path)

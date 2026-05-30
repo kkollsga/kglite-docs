@@ -28,7 +28,7 @@ from __future__ import annotations
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from kglite_docs.activity import register_agent
 from kglite_docs.errors import InvalidEnumError, SelfVerificationError
@@ -291,6 +291,39 @@ def assess(
     around it). They're recorded as ``USED_CONTEXT`` edges so retrieval can
     pull the full span later, and so they are **excluded from the work-list**
     (no one re-judges a chunk that was already covered as context)."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    a = _assemble_assessment(
+        store, study_id=study_id, chunk_id=chunk_id, stance=stance, weight=weight,
+        rationale=rationale, agent_id=agent_id, model=model, provenance=provenance,
+        quote=quote, char_start=char_start, char_end=char_end,
+        context_chunk_ids=context_chunk_ids, now=_now(),
+    )
+    register_agent(store, agent_id=agent_id)
+    _write_assessments(store, [a])
+    return cast("dict[str, Any]", a["result"])
+
+
+def _assemble_assessment(
+    store: Store,
+    *,
+    study_id: str,
+    chunk_id: str,
+    stance: str,
+    weight: float,
+    agent_id: str,
+    rationale: str = "",
+    model: str = "",
+    provenance: str = PROVENANCE_DEFAULT,
+    quote: str = "",
+    char_start: int | None = None,
+    char_end: int | None = None,
+    context_chunk_ids: list[str] | None = None,
+    now: str,
+) -> dict[str, Any]:
+    """Validate one assessment and build its node row + edges/labels metadata —
+    **no writes**. Shared by `assess` (single) and `assess_many` (batch) so both
+    go through one validated code path."""
     if stance not in VALID_STANCES:
         raise InvalidEnumError(
             f"invalid stance: {stance!r} (expected one of {sorted(VALID_STANCES)})"
@@ -305,15 +338,18 @@ def assess(
         raise InvalidEnumError(f"weight must be a number in [0,1] (got {weight!r})") from None
     if not 0.0 <= weight <= 1.0:
         raise InvalidEnumError(f"weight must be in [0,1] (got {weight})")
-    if not _study_exists(store, study_id):
-        raise InvalidEnumError(f"study not found: {study_id}")
     quote, span_start, span_end = _resolve_span(store, chunk_id, quote, char_start, char_end)
-
-    register_agent(store, agent_id=agent_id)
     aid = "assess_" + uuid.uuid4().hex[:16]
-    store.upsert_nodes(
-        ASSESSMENT,
-        [{
+    ctx = [cid for cid in (context_chunk_ids or []) if cid and cid != chunk_id]
+    return {
+        "aid": aid,
+        "agent_id": agent_id,
+        "study_id": study_id,
+        "chunk_id": chunk_id,
+        "ctx": ctx,
+        "stance_label": label_for("study.stance", stance),
+        "prov_label": label_for("assessment.provenance", provenance),
+        "node": {
             "id": aid,
             "title": f"{stance} ({weight:.2f}) {chunk_id}",
             "study_id": study_id,
@@ -327,45 +363,94 @@ def assess(
             "char_end": span_end,
             "by_agent": agent_id,
             "model": model,
-            "created_at": _now(),
+            "created_at": now,
             "verification_status": ASSESSMENT_UNVERIFIED,
-        }],
-    )
+        },
+        "result": {
+            "assessment_id": aid, "study_id": study_id, "chunk_id": chunk_id,
+            "stance": stance, "weight": weight, "provenance": provenance,
+            "quote": quote, "char_start": span_start, "char_end": span_end,
+            "context_chunk_ids": ctx,
+        },
+    }
+
+
+def _write_assessments(store: Store, assembled: list[dict[str, Any]]) -> None:
+    """Persist a batch of assembled assessments — nodes, edges, and labels — via
+    the bulk API (one call per kind). Works for one row or many."""
+    if not assembled:
+        return
+    store.upsert_nodes(ASSESSMENT, [a["node"] for a in assembled])
     store.upsert_edges(
-        ASSESSED_AS, [{"src": chunk_id, "dst": aid}],
+        ASSESSED_AS, [{"src": a["chunk_id"], "dst": a["aid"]} for a in assembled],
         source_type=CHUNK, target_type=ASSESSMENT,
     )
     store.upsert_edges(
-        OF_STUDY, [{"src": aid, "dst": study_id}],
+        OF_STUDY, [{"src": a["aid"], "dst": a["study_id"]} for a in assembled],
         source_type=ASSESSMENT, target_type=STUDY,
     )
     store.upsert_edges(
-        AUTHORED, [{"src": agent_id, "dst": aid}],
+        AUTHORED, [{"src": a["agent_id"], "dst": a["aid"]} for a in assembled],
         source_type=AGENT, target_type=ASSESSMENT,
     )
-    stance_label = label_for("study.stance", stance)
-    if stance_label:
-        store.add_label(ASSESSMENT, [aid], stance_label)
-    prov_label = label_for("assessment.provenance", provenance)
-    if prov_label:
-        store.add_label(ASSESSMENT, [aid], prov_label)
+    stance_groups: dict[str, list[str]] = {}
+    prov_groups: dict[str, list[str]] = {}
+    for a in assembled:
+        if a["stance_label"]:
+            stance_groups.setdefault(a["stance_label"], []).append(a["aid"])
+        if a["prov_label"]:
+            prov_groups.setdefault(a["prov_label"], []).append(a["aid"])
+    for lbl, ids in stance_groups.items():
+        store.add_label(ASSESSMENT, ids, lbl)
+    for lbl, ids in prov_groups.items():
+        store.add_label(ASSESSMENT, ids, lbl)
     init_label = label_for("assessment.verification_status", ASSESSMENT_UNVERIFIED)
     if init_label:
-        store.add_label(ASSESSMENT, [aid], init_label)
-    # Record neighbor chunks read to interpret the focal one (excluding the
-    # focal itself). These become USED_CONTEXT edges → backlink + dedup.
-    ctx = [cid for cid in (context_chunk_ids or []) if cid and cid != chunk_id]
-    if ctx:
+        store.add_label(ASSESSMENT, [a["aid"] for a in assembled], init_label)
+    ctx_edges = [
+        {"src": a["aid"], "dst": cid} for a in assembled for cid in a["ctx"]
+    ]
+    if ctx_edges:
         store.upsert_edges(
-            USED_CONTEXT, [{"src": aid, "dst": cid} for cid in ctx],
-            source_type=ASSESSMENT, target_type=CHUNK,
+            USED_CONTEXT, ctx_edges, source_type=ASSESSMENT, target_type=CHUNK,
         )
-    return {
-        "assessment_id": aid, "study_id": study_id, "chunk_id": chunk_id,
-        "stance": stance, "weight": weight, "provenance": provenance,
-        "quote": quote, "char_start": span_start, "char_end": span_end,
-        "context_chunk_ids": ctx,
-    }
+
+
+def assess_many(
+    store: Store, *, study_id: str, rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Batch-assess many chunks in one shot — one validated, batched write for a
+    fan-out (and, through the MCP layer, a single persist). Each row is a dict
+    with `chunk_id`/`stance`/`weight`/`agent_id` (+ optional `rationale`,
+    `model`, `provenance`, `quote`/`char_start`/`char_end`, `context_chunk_ids`).
+    All rows are validated *before* any write, so one bad row aborts the batch
+    with nothing written."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    if not rows:
+        return {"created": 0, "assessments": []}
+    now = _now()
+    assembled: list[dict[str, Any]] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            raise InvalidEnumError(
+                f"assess_many: each row must be a dict (got {type(r).__name__})"
+            )
+        missing = [k for k in ("chunk_id", "stance", "weight", "agent_id") if k not in r]
+        if missing:
+            raise InvalidEnumError(f"assess_many: row missing required field(s) {missing}")
+        assembled.append(_assemble_assessment(
+            store, study_id=study_id, chunk_id=r["chunk_id"], stance=r["stance"],
+            weight=r["weight"], agent_id=r["agent_id"], rationale=r.get("rationale", ""),
+            model=r.get("model", ""), provenance=r.get("provenance", PROVENANCE_DEFAULT),
+            quote=r.get("quote", ""), char_start=r.get("char_start"),
+            char_end=r.get("char_end"), context_chunk_ids=r.get("context_chunk_ids"),
+            now=now,
+        ))
+    for ag in {a["agent_id"] for a in assembled}:
+        register_agent(store, agent_id=ag)
+    _write_assessments(store, assembled)
+    return {"created": len(assembled), "assessments": [a["result"] for a in assembled]}
 
 
 def supersede_assessment(
