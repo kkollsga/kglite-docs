@@ -7,6 +7,20 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — lazy, agent-driven OCR (`ocr("request")`)
+- **The first time an agent needs a scanned page, it's handed the OCR task to do
+  itself** instead of getting empty text. `ocr("request", page_id=…|doc_id=…,
+  page_number=…, agent_id=…)` returns the rendered page (`image_b64`) plus a
+  strict **verbatim** transcription prompt (`OCR_PROMPT` — transcribe exactly,
+  mark `[illegible]`, no inference; it will be quoted as evidence); the agent
+  transcribes and calls `ocr("submit")`. kglite-docs still ships **no OCR
+  engine** — the vision-capable agent is the engine (agent-first). Pass
+  `agent_type` to route the task to a specific OCR subagent (echoed + recorded;
+  the library never dispatches it). The request is recorded on the page
+  (who/when/agent_type, first request preserved). `submit_ocr` now stamps OCR'd
+  chunks `ocr_derived` (+ `ocr_by`/`ocr_model`) so a reviewer knows to eyeball
+  the image before quoting. Requesting a page that isn't `needs_ocr` raises.
+
 ### Fixed — robust OCR-requirement detection
 - **Scanned pages stop silently passing as `ready`.** A field report found the
   single strongest fact in a case — the opposing party's sworn confession on a

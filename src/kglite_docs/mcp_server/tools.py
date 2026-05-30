@@ -701,15 +701,19 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         action: str,
         doc_id: str | None = None,
         page_id: str | None = None,
+        page_number: int | None = None,
         markdown: str | None = None,
         agent_id: str | None = None,
+        agent_type: str = "",
         limit: int = 20,
         include_images: bool = True,
         dpi: int = 200,
         model: str = "",
         confidence: float | None = None,
     ) -> Any:
-        """OCR pipeline (for pages with empty text after parse).
+        """OCR pipeline (for scanned/image pages flagged `needs_ocr`).
+        kglite-docs ships NO OCR engine — you (a vision-capable agent) are the
+        engine. Lazy + agent-driven: request a page → transcribe → submit.
 
         Actions:
 
@@ -717,17 +721,23 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           pages). Optional `doc_id`.
         - **`pending`** — pages flagged `needs_ocr`, each with a base64
           PNG render. Optional `doc_id`, `limit`, `include_images`, `dpi`.
-        - **`submit`** — patch agent-supplied OCR markdown back into a
-          page; re-chunks + re-embeds. Requires `page_id`, `markdown`,
-          `agent_id`.
+        - **`request`** — the lazy path: get the OCR **task** for one page (the
+          rendered page `image_b64` + a strict verbatim `prompt`) instead of
+          empty text. Identify by `page_id` or `doc_id`+`page_number`; requires
+          `agent_id`. Pass `agent_type` to route the task to a specific OCR
+          subagent (echoed back; you dispatch it). Raises if the page isn't
+          flagged `needs_ocr`.
+        - **`submit`** — patch your transcription back into a page; re-chunks +
+          re-embeds and marks the chunks `ocr_derived`. Requires `page_id`,
+          `markdown`, `agent_id`.
 
         Example::
 
-            ocr("status")
             for p in ocr("pending", limit=5):
-                # call vision LLM on p["image_b64"] → md
-                ocr("submit", page_id=p["page_id"], markdown=md,
-                    agent_id="ocr-bot")
+                task = ocr("request", page_id=p["page_id"], agent_id="lead",
+                           agent_type="vision-ocr")
+                md = <transcribe task["image_b64"] per task["prompt"]>
+                ocr("submit", page_id=p["page_id"], markdown=md, agent_id="lead")
         """
         if action == "status":
             return corpus.ocr_status(doc_id=doc_id)
@@ -736,15 +746,25 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 doc_id=doc_id, limit=limit,
                 include_images=include_images, dpi=dpi,
             )
+        if action == "request":
+            r = corpus.request_ocr(
+                page_id=page_id, doc_id=doc_id, page_number=page_number,
+                agent_id=_require(agent_id, "agent_id", action, "ocr"),
+                agent_type=agent_type, dpi=dpi,
+            )
+            _persist(corpus)
+            return r
         if action == "submit":
-            return corpus.submit_ocr(
+            r = corpus.submit_ocr(
                 _require(page_id, "page_id", action, "ocr"),
                 _require(markdown, "markdown", action, "ocr"),
                 agent_id=_require(agent_id, "agent_id", action, "ocr"),
                 model=model, confidence=confidence,
             )
+            _persist(corpus)
+            return r
         raise ValueError(
-            f"ocr(): unknown action {action!r}. Valid: status, pending, submit",
+            f"ocr(): unknown action {action!r}. Valid: status, pending, request, submit",
         )
 
     # ─── cluster ──────────────────────────────────────────────────────────

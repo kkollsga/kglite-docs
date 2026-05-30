@@ -43,7 +43,10 @@ standalone functions.
   agent(action, ...)      upsert | get | list | activity
   review(action, ...)     enqueue | enqueue_chunks | claim_next | claim |
                           unclaim | complete | list | get | stats
-  ocr(action, ...)        status | pending | submit
+  ocr(action, ...)        status | pending | request | submit
+                          (no engine ships — YOU transcribe: request a
+                           needs_ocr page → get its image + a verbatim prompt
+                           → submit. agent_type routes to an OCR subagent.)
   cluster(action, ...)    run | get | list | export
   translate(action, ...)  add | list | assemble
 

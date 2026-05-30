@@ -9,6 +9,7 @@ visually and return its markdown via `submit_ocr`.
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,23 @@ from kglite_docs.schema import (
 )
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts  # noqa: E402
+
+#: The verbatim-transcription instruction handed to the agent that performs OCR.
+#: kglite-docs is agent-first and ships no OCR engine — the vision-capable agent
+#: is the engine. Discipline matters: this text will be *quoted* in a brief, so
+#: smoothing/inventing is a defect, not a feature.
+OCR_PROMPT = (
+    "Transcribe this page image VERBATIM. Reproduce the text exactly as written "
+    "— same wording, numbers, names, punctuation, and line order. Do NOT "
+    "summarize, correct, translate, modernize, or infer. Mark anything you "
+    "cannot read confidently as [illegible]; never guess. Preserve structure as "
+    "markdown (headings, lists, tables) where it is visually unambiguous. Return "
+    "only the transcription. The result will be quoted as primary evidence."
+)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def ocr_status(
@@ -143,6 +161,73 @@ def list_pending_ocr(
     return rows
 
 
+def request_ocr(
+    store: Store,
+    *,
+    page_id: str | None = None,
+    doc_id: str | None = None,
+    page_number: int | None = None,
+    agent_id: str,
+    agent_type: str = "",
+    dpi: int = 200,
+) -> dict[str, Any]:
+    """Lazy, agent-driven OCR. The first time an agent asks for a `needs_ocr`
+    page, hand it the OCR **task** to perform itself — the rendered page (base64
+    PNG) plus the verbatim `OCR_PROMPT` — instead of serving empty/junk text.
+    The agent transcribes and calls `submit_ocr`.
+
+    Identify the page by `page_id`, or by `doc_id` + `page_number`. Raises if the
+    page isn't found, isn't flagged `needs_ocr` (nothing to OCR), or its source
+    file is missing. `agent_type` is echoed (and recorded) so an orchestrator can
+    route the task to a specific OCR subagent — the library never dispatches it
+    (agent-first). The request is recorded on the page (who/when/agent_type;
+    first request preserved) for an audit trail."""
+    params: dict[str, Any]
+    if page_id:
+        where, params = "p.id = $pid", {"pid": page_id}
+    elif doc_id and page_number is not None:
+        where, params = "p.doc_id = $doc AND p.page_number = $pn", {"doc": doc_id, "pn": int(page_number)}
+    else:
+        raise InvalidEnumError("request_ocr needs page_id, or doc_id + page_number")
+    rows = _df_dicts(store.cypher(
+        f"MATCH (d:Document)-[:HAS_PAGE]->(p:Page) WHERE {where} "
+        "RETURN p.id AS page_id, p.doc_id AS doc_id, p.page_number AS page_number, "
+        "p.needs_ocr AS needs_ocr, p.ocr_requested_at AS prior, d.path AS doc_path",
+        params=params,
+    ))
+    if not rows:
+        raise InvalidEnumError(f"page not found: {page_id or f'{doc_id} p.{page_number}'}")
+    r = rows[0]
+    if not r.get("needs_ocr"):
+        raise InvalidEnumError(
+            f"page {r['page_id']} is not flagged needs_ocr — nothing to OCR "
+            "(it already has extractable text)."
+        )
+    doc_path = r.get("doc_path") or ""
+    if not doc_path or not Path(doc_path).exists():
+        raise InvalidEnumError(
+            f"source file missing for page {r['page_id']}: {doc_path or '<no path recorded>'} "
+            "— cannot render the page to OCR."
+        )
+    register_agent(store, agent_id=agent_id)
+    pno = int(r["page_number"])
+    png = render_page_png(doc_path, pno, dpi=dpi)
+    prior = r.get("prior") or ""
+    requested_at = prior or _now()
+    store.cypher(
+        "MATCH (p:Page {id: $pid}) SET p.ocr_requested_by = $aid, "
+        "p.ocr_agent_type = $at, p.ocr_requested_at = $ra",
+        params={"pid": r["page_id"], "aid": agent_id, "at": agent_type, "ra": requested_at},
+    )
+    return {
+        "page_id": r["page_id"], "doc_id": r["doc_id"], "page_number": pno,
+        "prompt": OCR_PROMPT, "agent_type": agent_type,
+        "image_b64": base64.b64encode(png).decode("ascii"), "image_mime": "image/png",
+        "already_requested": bool(prior),
+        "submit_with": "ocr('submit', page_id=…, markdown=<transcription>, agent_id=…)",
+    }
+
+
 def submit_ocr(
     store: Store,
     embedder: Any,
@@ -211,6 +296,11 @@ def submit_ocr(
             "text_hash": ch.text_hash_value,
             "view_count": 0,
             "last_viewed_at": "",
+            # Honesty marker: this text is OCR-derived, not native extraction —
+            # a reviewer should eyeball the page image before quoting it.
+            "ocr_derived": True,
+            "ocr_model": model,
+            "ocr_by": agent_id,
         })
     if not chunk_rows:
         return {"page_id": page_id, "chunks_added": 0}
