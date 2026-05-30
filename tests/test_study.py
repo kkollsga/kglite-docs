@@ -432,6 +432,50 @@ def test_supersede_unknown_assessment_raises(corpus: Corpus, tmp_path: Path) -> 
         corpus.supersede_assessment("nope", stance="supports", weight=0.5, agent_id="a1")
 
 
+def test_conflicts_surfaces_opposing_assessments(corpus: Corpus, tmp_path: Path) -> None:
+    """FEAT-8: a chunk with both supports and against is a conflict; agreement
+    is not."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    # ch[0]: contested (a1 supports, a2 against)
+    corpus.assess(sid, ch[0], stance="supports", weight=0.8, agent_id="a1", rationale="for")
+    corpus.assess(sid, ch[0], stance="against", weight=0.6, agent_id="a2", rationale="vs")
+    # ch[1]: agreement (both supports) — not a conflict
+    corpus.assess(sid, ch[1], stance="supports", weight=0.7, agent_id="a1")
+    corpus.assess(sid, ch[1], stance="supports", weight=0.5, agent_id="a2")
+    # ch[2]: supports + neutral — not a conflict
+    corpus.assess(sid, ch[2], stance="supports", weight=0.4, agent_id="a1")
+    corpus.assess(sid, ch[2], stance="neutral", weight=0.1, agent_id="a2")
+
+    rep = corpus.study_conflicts(sid)
+    assert rep["total"] == 1
+    c = rep["conflicts"][0]
+    assert c["chunk_id"] == ch[0]
+    assert {r["by_agent"] for r in c["supports"]} == {"a1"}
+    assert {r["by_agent"] for r in c["against"]} == {"a2"}
+    assert c["supports"][0]["provenance"] == "primary_text"
+
+
+def test_conflicts_resolved_by_supersede(corpus: Corpus, tmp_path: Path) -> None:
+    """A correction that removes the opposition clears the conflict."""
+    ch = _ingest_chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.8, agent_id="a1")
+    against = corpus.assess(sid, ch[0], stance="against", weight=0.6, agent_id="a2")
+    assert corpus.study_conflicts(sid)["total"] == 1
+
+    # a2 corrects their against → supports; no opposition remains.
+    corpus.supersede_assessment(against["assessment_id"], stance="supports",
+                                weight=0.7, agent_id="a2")
+    assert corpus.study_conflicts(sid)["total"] == 0
+
+
+def test_conflicts_unknown_study_raises(corpus: Corpus, tmp_path: Path) -> None:
+    _ingest_chunks(corpus, tmp_path)
+    with pytest.raises(InvalidEnumError):
+        corpus.study_conflicts("nope")
+
+
 def test_ledger_reports_total_and_returned_on_truncation(corpus: Corpus, tmp_path: Path) -> None:
     """BUG-3: a clipped ledger must say so — total > returned, not a silent cut."""
     ch = _ingest_chunks(corpus, tmp_path)

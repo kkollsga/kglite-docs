@@ -76,6 +76,7 @@ from kglite_docs.types import (
     ComparisonQueryResult,
     ComparisonResult,
     ComposedContext,
+    ConflictReport,
     CorpusStatus,
     CoverageReport,
     DocumentDetail,
@@ -1181,6 +1182,13 @@ class Corpus:
     def get_study(self, study_id: str) -> StudyRow | None:
         """Study metadata + tallies + its conclusion summaries."""
         return cast(StudyRow | None, study_mod.get_study(self._store, study_id=study_id))
+
+    def study_conflicts(self, study_id: str) -> ConflictReport:
+        """Chunks with both a current `supports` and `against` assessment — the
+        contested evidence to review first. Computed over the current
+        (non-superseded, latest-per-agent) set; each conflict carries its
+        opposing rows split by side."""
+        return cast(ConflictReport, study_mod.conflicts(self._store, study_id=study_id))
 
     def next_unassessed(
         self, study_id: str, *,

@@ -858,6 +858,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           assessments are hidden; pass true for the full history), `limit`.
           Reports `total`/`returned` so truncation is visible (`total > returned`
           ⇒ raise `limit` to see the rest).
+        - **`conflicts`** — the contested evidence: chunks with both a current
+          `supports` and `against` assessment, each with its opposing rows (most
+          contested first). Requires `study_id`. Read these first — that's where
+          the disagreement is.
         - **`verify`** — a second agent checks an assessment. Requires
           `assessment_id`, `verdict` (`verified`/`disputed`/`duplicate` —
           `duplicate` = "same as another"), `verifier_agent_id`; optional
@@ -955,6 +959,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             )
             _persist(corpus)
             return r
+        if action == "conflicts":
+            return corpus.study_conflicts(_require(study_id, "study_id", action, "study"))
         if action == "list":
             return corpus.list_studies(status=status, created_by=created_by)
         if action == "get":
@@ -972,5 +978,5 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         raise ValueError(
             f"study(): unknown action {action!r}. Valid: define, assess, supersede, "
-            "next, ledger, verify, conclude, list, get, reopen, delete",
+            "next, ledger, conflicts, verify, conclude, list, get, reopen, delete",
         )

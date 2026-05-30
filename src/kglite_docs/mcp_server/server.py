@@ -98,6 +98,8 @@ embeddings; iterate chunks via study("next"), so you can skip index):
      study("ledger", study_id=sid, stance="supports")   — just the supporting side
      — current-by-default: corrected assessments are hidden; pass
        include_superseded=True for the full history.
+     study("conflicts", study_id=sid)   — chunks with opposing current
+       assessments (supports vs against); review the contested evidence first.
   4. study("verify", assessment_id=..., verdict="verified"|"disputed"|
            "duplicate", verifier_agent_id="checker")    — 2nd-agent check
      study("supersede", assessment_id=old, stance=..., weight=..., agent_id=...)

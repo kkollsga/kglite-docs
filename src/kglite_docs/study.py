@@ -46,7 +46,9 @@ from kglite_docs.schema import (
     HOLDS,
     OF_STUDY,
     PROVENANCE_DEFAULT,
+    STANCE_AGAINST,
     STANCE_DEFERRED,
+    STANCE_SUPPORTS,
     STUDY,
     STUDY_CLOSED,
     STUDY_OPEN,
@@ -575,6 +577,74 @@ def ledger(
         "total": total,
         "returned": len(rows),
         "tallies": _tallies(store, study_id),
+    }
+
+
+def conflicts(store: Store, *, study_id: str) -> dict[str, Any]:
+    """Chunks with *both* a current `supports` and a current `against`
+    assessment — the contested evidence an orchestrator should review first.
+
+    Computed over the current set (latest-per-(chunk, agent), excluding
+    superseded), so a correction that resolves a disagreement removes it from
+    the list. Each conflict carries its opposing rows split by side.
+    """
+    meta = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.question AS question",
+        params={"id": study_id},
+    ))
+    if not meta:
+        raise InvalidEnumError(f"study not found: {study_id}")
+
+    superseded_ids = _superseded_ids(store, study_id)
+    params: dict[str, Any] = {"id": study_id}
+    sup_filter = ""
+    if superseded_ids:
+        sup_filter = "WHERE NOT latest.id IN $superseded "
+        params["superseded"] = list(superseded_ids)
+    rows = _df_dicts(store.cypher(
+        "MATCH (c:Chunk)-[:ASSESSED_AS]->(a:Assessment)-[:OF_STUDY]->(:Study {id: $id}) "
+        "WITH c, a.by_agent AS ag, a ORDER BY a.created_at DESC "
+        "WITH c, ag, collect(a)[0] AS latest "
+        f"{sup_filter}"
+        "RETURN latest.id AS assessment_id, c.id AS chunk_id, c.doc_id AS doc_id, "
+        "c.page_number AS page, latest.stance AS stance, latest.weight AS weight, "
+        "latest.provenance AS provenance, latest.rationale AS rationale, "
+        "latest.by_agent AS by_agent, c.text AS text "
+        "ORDER BY c.doc_id, c.page_number",
+        params=params,
+    ))
+
+    by_chunk: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+    for r in rows:
+        cid = r["chunk_id"]
+        if cid not in by_chunk:
+            by_chunk[cid] = []
+            order.append(cid)
+        by_chunk[cid].append(r)
+
+    out: list[dict[str, Any]] = []
+    for cid in order:
+        rs = by_chunk[cid]
+        supports = [r for r in rs if r["stance"] == STANCE_SUPPORTS]
+        against = [r for r in rs if r["stance"] == STANCE_AGAINST]
+        if supports and against:
+            first = rs[0]
+            out.append({
+                "chunk_id": cid,
+                "doc_id": first["doc_id"],
+                "page": first["page"],
+                "text": first["text"],
+                "supports": supports,
+                "against": against,
+            })
+    # Most-contested first (total opposing rows).
+    out.sort(key=lambda x: len(x["supports"]) + len(x["against"]), reverse=True)
+    return {
+        "study_id": study_id,
+        "question": meta[0]["question"],
+        "conflicts": out,
+        "total": len(out),
     }
 
 

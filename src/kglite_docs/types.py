@@ -451,6 +451,26 @@ class Ledger(TypedDict, total=False):
     tallies: dict[str, Any]
 
 
+class ConflictRow(TypedDict, total=False):
+    """One contested chunk — current `supports` vs `against` assessments."""
+
+    chunk_id: str
+    doc_id: str
+    page: int
+    text: str
+    supports: list[AssessmentRow]
+    against: list[AssessmentRow]
+
+
+class ConflictReport(TypedDict, total=False):
+    """`Corpus.study_conflicts()` return shape."""
+
+    study_id: str
+    question: str
+    conflicts: list[ConflictRow]
+    total: int
+
+
 __all__ = [
     "AgentActivity", "AgentConfig", "AgentKind", "AgentRow",
     "ChunkDetail", "ChunkStatus",
@@ -472,5 +492,5 @@ __all__ = [
     "TargetKind",
     "TranslationStatus",
     "Stance", "Provenance", "AssessmentVerdict", "AssessmentStatus", "StudyStatus",
-    "StudyRow", "AssessmentRow", "Ledger",
+    "StudyRow", "AssessmentRow", "Ledger", "ConflictRow", "ConflictReport",
 ]

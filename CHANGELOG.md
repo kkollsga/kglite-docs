@@ -8,6 +8,12 @@ breaking changes (called out below).
 ## [Unreleased]
 
 ### Added — evidence integrity
+- **`study("conflicts", study_id)` surfaces contested evidence (FEAT-8).** Returns
+  the chunks that have *both* a current `supports` and a current `against`
+  assessment, each with its opposing rows split by side (most contested first) —
+  the disagreement an orchestrator should review before concluding. Computed over
+  the current set (latest-per-agent, non-superseded), so a correction that
+  resolves a disagreement removes it from the list.
 - **`study("supersede", …)` + current-by-default ledger (FEAT-5, BUG-4).**
   Audit-preserving correction: `supersede_assessment(old_id, …)` records a
   replacement assessment linked to the one it corrects by an explicit
