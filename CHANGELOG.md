@@ -7,6 +7,21 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — OCR export/import sidecar + OCR'd chunks are first-class
+- **`ocr("export", doc_id)`** writes a document's OCR to a sidecar JSON
+  (`<source>.ocr.json`) — `{source_file, doc_id, generated_at, by_model,
+  pages:[{page_number, ocr_model, ocr_status, legible_chars, text, …}]}` — so OCR
+  is portable, auditable, diffable, hand-correctable, and re-importable;
+  **`ocr("import", path)`** round-trips it back in (done once; a human fixes the
+  failed pages and re-imports; OCR travels with the PDF). Carries the
+  illegibility flag.
+- **Fixed: OCR'd chunks are now marked embedded.** `submit_ocr` embedded the
+  chunks but didn't set `embedded`/`:Embedded`, so `search()` counted them as
+  unembedded — warning they were "invisible" (they weren't) and, for a
+  scanned-only document, raising `NotIndexedError` despite the vectors existing.
+  OCR'd text now lives on the graph exactly like native-text chunks: `:Ready`
+  + `:Embedded`, searchable/studyable, with `ocr_derived` honesty markers.
+
 ### Added — adaptive image prep + tiling (attack illegibility at the source)
 - **The library right-sizes the page image it ships for OCR.** A page rendered
   larger than a vision model's input (~1.15 MP) is silently downscaled by the

@@ -960,6 +960,17 @@ class Corpus:
             include_images=include_images, dpi=dpi,
         ))
 
+    def export_ocr(self, doc_id: str, *, out_path: str | None = None) -> dict[str, Any]:
+        """Write a document's OCR to a sidecar JSON (`<source>.ocr.json`) —
+        portable, auditable, hand-correctable, re-importable. Carries each page's
+        ocr_status/legible_chars."""
+        return ocr_mod.export_ocr(self._store, doc_id=doc_id, out_path=out_path)
+
+    def import_ocr(self, path: str) -> dict[str, Any]:
+        """Round-trip a sidecar JSON back in (apply each page via submit_ocr). The
+        document must already be ingested (matched by doc_id)."""
+        return ocr_mod.import_ocr(self._store, self._embedder, path=path)
+
     def list_illegible_pages(
         self, *, doc_id: str | None = None, limit: int = 50,
         include_images: bool = False, dpi: int = 200,

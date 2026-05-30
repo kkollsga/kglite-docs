@@ -9,7 +9,9 @@ visually and return its markdown via `submit_ocr`.
 from __future__ import annotations
 
 import base64
+import json
 import re
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ from kglite_docs.schema import (
     CHUNK_STATUS_READY,
     CHUNK_TEXT_COL,
     HAS_CHUNK,
+    LABEL_EMBEDDED,
     NEXT_CHUNK,
     PAGE,
     label_for,
@@ -208,6 +211,76 @@ def list_pending_ocr(
                 r["image_b64"] = ""
                 r["image_error"] = str(exc)
     return rows
+
+
+def export_ocr(store: Store, *, doc_id: str, out_path: str | None = None) -> dict[str, Any]:
+    """Write a document's OCR to a **sidecar JSON** (`<source>.ocr.json` next to
+    the PDF, unless `out_path` is given). Makes OCR portable, auditable,
+    diffable, hand-correctable, and re-importable — done once, travels with the
+    file. Carries each page's `ocr_status`/`legible_chars` (the illegibility flag)
+    so downstream tools never mistake noise for text."""
+    doc = _df_dicts(store.cypher(
+        "MATCH (d:Document {id: $id}) RETURN d.path AS path, d.title AS title",
+        params={"id": doc_id},
+    ))
+    if not doc:
+        raise InvalidEnumError(f"document not found: {doc_id}")
+    doc_path = doc[0].get("path") or ""
+    pages = _df_dicts(store.cypher(
+        "MATCH (d:Document {id: $id})-[:HAS_PAGE]->(p:Page) "
+        "WHERE p.ocr_outcome IS NOT NULL "
+        "RETURN p.page_number AS page_number, p.ocr_model AS ocr_model, "
+        "p.ocr_agent AS ocr_agent, p.ocr_confidence AS ocr_confidence, "
+        "p.ocr_outcome AS ocr_status, p.legible_chars AS legible_chars, "
+        "p.markdown AS text ORDER BY p.page_number",
+        params={"id": doc_id},
+    ))
+    if out_path is None:
+        if not doc_path:
+            raise InvalidEnumError("no source path recorded — pass out_path explicitly")
+        p = Path(doc_path)
+        out_path = str(p.with_name(p.stem + ".ocr.json"))
+    source_file = Path(doc_path).name if doc_path else (doc[0].get("title") or doc_id)
+    by_model = dict(Counter(str(pg.get("ocr_model") or "") for pg in pages if pg.get("ocr_model")))
+    payload = {
+        "source_file": source_file, "doc_id": doc_id, "generated_at": _now(),
+        "by_model": by_model, "page_count": len(pages), "pages": pages,
+    }
+    Path(out_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"out_path": out_path, "pages": len(pages), "by_model": by_model}
+
+
+def import_ocr(store: Store, embedder: Any, *, path: str) -> dict[str, Any]:
+    """Round-trip a sidecar JSON (`export_ocr`) back into the graph: apply each
+    page's transcription via `submit_ocr` (re-chunk + embed + recompute the
+    legibility outcome). The document must already be ingested (matched by
+    `doc_id`); a human can fix the failed pages in the JSON and re-import without
+    re-OCR. Pages not present in the corpus are skipped (reported)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    doc_id = data.get("doc_id") or ""
+    if not _df_dicts(store.cypher(
+        "MATCH (d:Document {id: $id}) RETURN d.id AS id", params={"id": doc_id},
+    )):
+        raise InvalidEnumError(
+            f"document {doc_id!r} not in this corpus — ingest the source PDF first, "
+            "then import its OCR sidecar."
+        )
+    imported = skipped = 0
+    for rec in data.get("pages", []):
+        prow = _df_dicts(store.cypher(
+            "MATCH (p:Page {doc_id: $d, page_number: $pn}) RETURN p.id AS id",
+            params={"d": doc_id, "pn": int(rec.get("page_number", -1))},
+        ))
+        if not prow:
+            skipped += 1
+            continue
+        submit_ocr(
+            store, embedder, page_id=prow[0]["id"], markdown=str(rec.get("text") or ""),
+            agent_id=str(rec.get("ocr_agent") or "import"), model=str(rec.get("ocr_model") or ""),
+            confidence=rec.get("ocr_confidence"),
+        )
+        imported += 1
+    return {"doc_id": doc_id, "pages_imported": imported, "pages_skipped": skipped}
 
 
 def list_illegible_pages(
@@ -422,6 +495,9 @@ def submit_ocr(
             "text_hash": ch.text_hash_value,
             "view_count": 0,
             "last_viewed_at": "",
+            # Embedded inline below — a first-class searchable chunk, same as a
+            # native-text chunk (so search/coverage don't treat it as unembedded).
+            "embedded": True,
             # Honesty marker: this text is OCR-derived, not native extraction —
             # a reviewer should eyeball the page image before quoting it.
             "ocr_derived": True,
@@ -433,10 +509,13 @@ def submit_ocr(
                 "ocr_outcome": outcome, "legible_chars": legible}
 
     store.upsert_nodes(CHUNK, chunk_rows)
-    # New chunks are all ready
+    # New chunks are ready AND (after embedding below) embedded — label both so
+    # they're first-class searchable chunks, not counted as unembedded.
+    chunk_ids = [r["id"] for r in chunk_rows]
     ready_label = label_for("chunk.status", CHUNK_STATUS_READY)
     if ready_label:
-        store.add_label(CHUNK, [r["id"] for r in chunk_rows], ready_label)
+        store.add_label(CHUNK, chunk_ids, ready_label)
+    store.add_label(CHUNK, chunk_ids, LABEL_EMBEDDED)
     store.upsert_edges(
         HAS_CHUNK, [{"src": page_id, "dst": r["id"]} for r in chunk_rows],
         source_type=PAGE, target_type=CHUNK,

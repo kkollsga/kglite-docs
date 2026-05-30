@@ -732,6 +732,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         confidence: float | None = None,
         force: bool = False,
         tiles: list[dict[str, Any]] | None = None,
+        out_path: str | None = None,
+        path: str | None = None,
     ) -> Any:
         """OCR pipeline (for scanned/image pages flagged `needs_ocr`).
         kglite-docs ships NO OCR engine — you (a vision-capable agent) are the
@@ -761,6 +763,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           re-embeds and marks the chunks `ocr_derived`. Requires `page_id`,
           `agent_id`, and either `markdown` (whole page) or `tiles=[{tile_index,
           markdown}]` from a tiled request (the library stitches them in order).
+        - **`export`** — write a doc's OCR to a sidecar JSON (`<source>.ocr.json`,
+          or `out_path`): portable, auditable, hand-correctable, re-importable;
+          carries each page's `ocr_status`/`legible_chars`. Requires `doc_id`.
+        - **`import`** — round-trip a sidecar JSON back in (re-apply each page).
+          Requires `path`; the document must already be ingested.
 
         Example::
 
@@ -801,9 +808,16 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             )
             _persist(corpus)
             return r
+        if action == "export":
+            return corpus.export_ocr(
+                _require(doc_id, "doc_id", action, "ocr"), out_path=out_path)
+        if action == "import":
+            r = corpus.import_ocr(_require(path, "path", action, "ocr"))
+            _persist(corpus)
+            return r
         raise ValueError(
             f"ocr(): unknown action {action!r}. Valid: status, pending, illegible, "
-            "request, submit",
+            "request, submit, export, import",
         )
 
     # ─── cluster ──────────────────────────────────────────────────────────
