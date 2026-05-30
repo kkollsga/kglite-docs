@@ -190,6 +190,7 @@ class Corpus:
         embed: bool = False,
         structure_aware: bool = False,
         context_summary: str = "",
+        source_party: str = "",
     ) -> IngestResult:
         """Ingest a document. Three modes:
 
@@ -240,7 +241,7 @@ class Corpus:
                 f.write(text)
                 tmp_path = Path(f.name)
             try:
-                return _ingest_doc(
+                result = _ingest_doc(
                     self._store, self._embedder, tmp_path,
                     title=title, source_uri=source_uri or "",
                     metadata=metadata, format=fmt, embed=embed,
@@ -248,12 +249,17 @@ class Corpus:
                 )
             finally:
                 tmp_path.unlink(missing_ok=True)
-        return _ingest_doc(
-            self._store, self._embedder, path,  # type: ignore[arg-type]
-            title=title, source_uri=source_uri, metadata=metadata,
-            format=format, embed=embed, structure_aware=structure_aware,
-            context_summary=context_summary,
-        )
+        else:
+            result = _ingest_doc(
+                self._store, self._embedder, path,  # type: ignore[arg-type]
+                title=title, source_uri=source_uri, metadata=metadata,
+                format=format, embed=embed, structure_aware=structure_aware,
+                context_summary=context_summary,
+            )
+        if source_party and getattr(result, "doc_id", None):
+            from kglite_docs import parties as parties_mod
+            parties_mod.set_source_party(self._store, doc_id=result.doc_id, party=source_party)
+        return result
 
     def ingest_dir(
         self,
@@ -435,11 +441,25 @@ class Corpus:
         )
         return cast(list[DocumentRow], _df_to_dicts(df))
 
+    def set_source_party(self, doc_id: str, party: str) -> dict[str, Any]:
+        """Tag a document with its source party (who produced/filed it) and
+        inherit it to the document's chunks — so an admission against interest
+        (primary text by the adverse party) can be surfaced. `party` is free-text
+        (`available_source_parties()` lists the registered set)."""
+        from kglite_docs import parties as parties_mod
+        return parties_mod.set_source_party(self._store, doc_id=doc_id, party=party)
+
+    def available_source_parties(self) -> list[dict[str, str]]:
+        """Registered source-party values (value + label + description). Empty
+        until a schema pack registers them; any value is still accepted."""
+        from kglite_docs import parties as parties_mod
+        return parties_mod.available_source_parties()
+
     def get_document(self, doc_id: str) -> DocumentDetail | None:
         df = self._store.cypher(
             "MATCH (d:Document {id: $id}) RETURN d.id AS id, d.title AS title, "
             "d.page_count AS pages, d.ingested_at AS ingested_at, d.byte_size AS bytes, "
-            "d.path AS path, d.metadata_json AS metadata_json",
+            "d.path AS path, d.source_party AS source_party, d.metadata_json AS metadata_json",
             params={"id": doc_id},
         )
         rows = _df_to_dicts(df)

@@ -60,6 +60,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         max_tokens_per_query: int = 2000,
         out_path: str | None = None,
         include_summaries: bool = False,
+        source_party: str = "",
+        party: str | None = None,
         agent_id: str | None = None,
     ) -> Any:
         """Document-level operations.
@@ -112,6 +114,14 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           and OCR-pending pages, plus a human `summary`. Optional `doc_id`.
           Route work with the matching label predicates (`MATCH (c:Chunk:Table)`,
           `MATCH (c:Chunk:HasMoney)`).
+        - **`set_party`** — tag a document with its **source party** (who produced
+          /filed it) and inherit it to its chunks, so an admission against
+          interest (primary text by the *adverse* party) surfaces in the ledger
+          (`source_party`) and is queryable (`MATCH (c:Chunk:Defense)`). Requires
+          `doc_id`, `party` (free-text; `parties` lists the registered set). You
+          can also tag at ingest via `source_party=`.
+        - **`parties`** — registered source-party values (value + label +
+          description); empty until a schema pack registers them.
 
         Examples::
 
@@ -163,12 +173,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 r = corpus.ingest(
                     text=text, title=title, format=format or "md", embed=embed,
                     structure_aware=structure_aware, context_summary=context_summary,
+                    source_party=source_party,
                 )
             else:
                 r = corpus.ingest(
                     path, title=title, format=format, source_uri=source_uri,
                     embed=embed, structure_aware=structure_aware,
-                    context_summary=context_summary,
+                    context_summary=context_summary, source_party=source_party,
                 )
             _persist(corpus)
             res = {
@@ -220,9 +231,18 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return corpus.coverage_report(doc_id=doc_id)
         if action == "map":
             return corpus.triage_map(doc_id=doc_id)
+        if action == "set_party":
+            r = corpus.set_source_party(
+                _require(doc_id, "doc_id", action, "document"),
+                _require(party, "party", action, "document"),
+            )
+            _persist(corpus)
+            return r
+        if action == "parties":
+            return corpus.available_source_parties()
         raise ValueError(
             f"document(): unknown action {action!r}. Valid: ingest, index, list, "
-            "get, sections, map, export, compare, status, coverage",
+            "get, sections, map, export, compare, status, coverage, set_party, parties",
         )
 
     # ─── chunk ────────────────────────────────────────────────────────────

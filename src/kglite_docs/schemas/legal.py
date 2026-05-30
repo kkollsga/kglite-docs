@@ -201,3 +201,20 @@ register_recommendation_trigger(
                       "evidence or arguments the court never addressed?",
     rationale="Repeatedly ignored favorable evidence implies a due-process study.",
 )
+
+# Source parties — whose words a document holds. Tagging an exhibit by who filed
+# it lets an admission against interest (primary text by the adverse party)
+# surface instead of sinking as someone else's characterization of it.
+from kglite_docs.parties import register_source_party  # noqa: E402
+
+for _party, _desc in {
+    "claimant": "The party bringing the action (plaintiff / autor).",
+    "respondent": "The party defending the action (defendant / réu).",
+    "defense": "Defense counsel's filing.",
+    "accuser": "The accusing/prosecuting party.",
+    "judge": "Authored by the judge (rulings, remarks).",
+    "court": "Issued by the court/registry (orders, certificates).",
+    "expert": "A court-appointed or party expert (perícia).",
+    "third_party": "A non-party (witness, amicus, external body).",
+}.items():
+    register_source_party(_party, description=_desc)

@@ -846,7 +846,7 @@ def ledger(
         "latest.rationale AS rationale, latest.by_agent AS by_agent, "
         "latest.quote AS quote, latest.char_start AS char_start, "
         "latest.char_end AS char_end, "
-        "labels(latest) AS labels, c.text AS text "
+        "labels(latest) AS labels, c.text AS text, c.source_party AS source_party "
         f"ORDER BY {rank_prefix}weight DESC LIMIT $lim",
         params=params,
     )
@@ -860,6 +860,7 @@ def ledger(
         r["quote"] = r.get("quote") or ""
         r["char_start"] = cs if isinstance(cs := r.get("char_start"), int) else -1
         r["char_end"] = ce if isinstance(ce := r.get("char_end"), int) else -1
+        r["source_party"] = r.get("source_party") or ""
     # Attach each row's USED_CONTEXT span (the neighbor chunks the agent read
     # to judge it) so retrieval can pull the full relevant span.
     ids = [r["assessment_id"] for r in rows if r.get("assessment_id")]

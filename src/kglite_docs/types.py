@@ -113,6 +113,7 @@ class DocumentDetail(TypedDict, total=False):
     ingested_at: str
     bytes: int
     path: str
+    source_party: str             # who produced/filed the document (if tagged)
     metadata_json: str
     toc: list[dict[str, Any]]
 
@@ -489,6 +490,7 @@ class AssessmentRow(TypedDict, total=False):
     superseded: bool
     context_chunk_ids: list[str]
     text: str
+    source_party: str             # who produced the chunk's document (if tagged)
 
 
 class Ledger(TypedDict, total=False):

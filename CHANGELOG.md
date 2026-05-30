@@ -7,6 +7,20 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — source-party dimension (whose words a document holds)
+- **Tag a document with who produced/filed it**, inherited to its chunks, so an
+  *admission against interest* (primary text by the **adverse** party) surfaces
+  instead of sinking as someone else's characterization of it. `provenance` says
+  *what was checked*; `source_party` says *whose words*. Set it at ingest
+  (`document("ingest", …, source_party="respondent")`) or after
+  (`document("set_party", doc_id=…, party=…)`); it becomes a queryable label
+  (`MATCH (c:Chunk:Respondent)`), shows on `document("get")`, and is surfaced per
+  row in the study `ledger` (`source_party`) — so "primary-text supporting
+  evidence by the adverse party" is one query. Generic + domain-opaque (free-text
+  → PascalCase label); the legal pack registers `claimant / respondent / defense /
+  accuser / judge / court / expert / third_party` for discovery
+  (`document("parties")`). Document-level for now (per-chunk override is future).
+
 ### Added — lazy, agent-driven OCR (`ocr("request")`)
 - **The first time an agent needs a scanned page, it's handed the OCR task to do
   itself** instead of getting empty text. `ocr("request", page_id=…|doc_id=…,
