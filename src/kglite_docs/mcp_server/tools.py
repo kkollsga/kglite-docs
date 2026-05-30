@@ -879,6 +879,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         verifier_agent_id: str | None = None,
         notes: str = "",
         text: str | None = None,
+        statement: str | None = None,
+        supporting_chunk_ids: list[str] | None = None,
+        finding_type: str = "",
         doc_id: str | None = None,
         section_id: str | None = None,
         element: str | None = None,
@@ -954,6 +957,16 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `supports` and `against` assessment, each with its opposing rows (most
           contested first). Requires `study_id`. Read these first — that's where
           the disagreement is.
+        - **`finding`** — record a **cross-chunk** pattern (what per-chunk
+          `assess` can't see: disparate treatment, conflicting rulings, …).
+          Requires `study_id`, `statement`, `supporting_chunk_ids=[…]` (the real
+          chunks it rests on), `stance`, `weight`, `agent_id`; optional
+          `finding_type` (free-text, becomes a routing label), `provenance`,
+          `rationale`. Findings are a separate collection from the per-chunk
+          assessment ledger.
+        - **`findings`** — list a study's cross-chunk findings (weight-ranked,
+          each with its supporting chunks). Requires `study_id`; optional
+          `finding_type` filter.
         - **`verify`** — a second agent checks an assessment. Requires
           `assessment_id`, `verdict` (`verified`/`disputed`/`duplicate` —
           `duplicate` = "same as another"), `verifier_agent_id`; optional
@@ -1062,6 +1075,25 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         if action == "conflicts":
             return corpus.study_conflicts(_require(study_id, "study_id", action, "study"))
+        if action == "finding":
+            r = corpus.create_finding(
+                _require(study_id, "study_id", action, "study"),
+                statement=_require(statement, "statement", action, "study"),
+                supporting_chunk_ids=_require(
+                    supporting_chunk_ids, "supporting_chunk_ids", action, "study"),
+                stance=_require(stance, "stance", action, "study"),
+                weight=_require(weight, "weight", action, "study"),
+                agent_id=_require(agent_id, "agent_id", action, "study"),
+                finding_type=finding_type, provenance=provenance or "primary_text",
+                rationale=rationale, model=model,
+            )
+            _persist(corpus)
+            return r
+        if action == "findings":
+            return corpus.list_findings(
+                _require(study_id, "study_id", action, "study"),
+                finding_type=finding_type or None,
+            )
         if action == "list":
             return corpus.list_studies(status=status, created_by=created_by)
         if action == "get":
@@ -1079,6 +1111,6 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         raise ValueError(
             f"study(): unknown action {action!r}. Valid: define, assess, assess_many, "
-            "supersede, next, ledger, conflicts, verify, conclude, list, get, "
-            "reopen, delete",
+            "supersede, next, ledger, conflicts, finding, findings, verify, "
+            "conclude, list, get, reopen, delete",
         )

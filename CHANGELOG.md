@@ -7,6 +7,20 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — cross-chunk synthesis (honest completeness)
+- **Cross-chunk `Finding` unit (`study("finding"/"findings")`).** A first-class
+  reified node asserting a *pattern over a set of chunks* — the unit per-chunk
+  `assess` structurally can't see (disparate treatment, conflicting rulings,
+  …; a real run scored every chunk `neutral` while the strongest argument lived
+  only in the JOIN of three). A Finding carries the same evidence axes as an
+  assessment (stance / weight / provenance / rationale) but spans many chunks via
+  `SUPPORTED_BY` edges (each must cite a real chunk); `finding_type` becomes a
+  routing label (`MATCH (f:Finding:DisparateTreatment)`). Findings are a
+  **separate collection** from the per-chunk assessment ledger — surfaced via
+  `study("findings")` / `get_study().findings`, and cascade-deleted with the
+  study. Generic: `finding_type` is free-text (the legal pattern vocabulary stays
+  in the vertical). Foundation for the synthesis gate (next phase).
+
 ## [0.0.12] — 2026-05-30
 
 Release theme: **multi-study routing** — classify a corpus once into a domain

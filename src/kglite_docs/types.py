@@ -500,6 +500,22 @@ class Ledger(TypedDict, total=False):
     scope_coverage: dict[str, int]  # present only when `element=` scoped
 
 
+class FindingRow(TypedDict, total=False):
+    """One cross-chunk Finding from `Corpus.list_findings()` — a pattern asserted
+    over a set of chunks."""
+
+    finding_id: str
+    statement: str
+    finding_type: str
+    stance: Stance
+    weight: float
+    provenance: Provenance
+    rationale: str
+    by_agent: str
+    verification_status: AssessmentStatus
+    supporting: list[dict[str, Any]]  # [{id, doc_id, page}, …]
+
+
 class ConflictRow(TypedDict, total=False):
     """One contested chunk — current `supports` vs `against` assessments."""
 
@@ -543,4 +559,5 @@ __all__ = [
     "TranslationStatus",
     "Stance", "Provenance", "AssessmentVerdict", "AssessmentStatus", "StudyStatus",
     "StudyRow", "AssessmentRow", "Ledger", "ConflictRow", "ConflictReport",
+    "FindingRow",
 ]

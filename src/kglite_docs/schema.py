@@ -24,6 +24,7 @@ REVIEW_TICKET: Final = "ReviewTicket"
 REVIEW_EVENT: Final = "ReviewEvent"
 STUDY: Final = "Study"
 ASSESSMENT: Final = "Assessment"
+FINDING: Final = "Finding"  # a cross-chunk pattern asserted over a SET of chunks
 VERIFICATION_EVENT: Final = "VerificationEvent"
 CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
@@ -52,6 +53,7 @@ CHECKED_OUT: Final = "CHECKED_OUT"            # Checkout → Chunk (the punched 
 HOLDS: Final = "HOLDS"                        # Agent → Checkout
 USED_CONTEXT: Final = "USED_CONTEXT"          # Assessment → Chunk (neighbors read to interpret the focal chunk)
 SUPERSEDES: Final = "SUPERSEDES"              # Assessment → Assessment (the one it replaces)
+SUPPORTED_BY: Final = "SUPPORTED_BY"          # Finding → Chunk (the chunks a cross-chunk pattern rests on)
 
 # Punchcard lease: a checkout older than this is treated as abandoned and
 # its chunks become claimable again (and are GC'd on the next claim).

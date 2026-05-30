@@ -1316,6 +1316,29 @@ class Corpus:
         opposing rows split by side."""
         return cast(ConflictReport, study_mod.conflicts(self._store, study_id=study_id))
 
+    def create_finding(
+        self, study_id: str, *, statement: str, supporting_chunk_ids: list[str],
+        stance: Stance, weight: float, agent_id: str, finding_type: str = "",
+        provenance: Provenance = "primary_text", rationale: str = "", model: str = "",
+    ) -> dict[str, Any]:
+        """Record a cross-chunk Finding — a pattern asserted over a *set* of
+        chunks (what per-chunk `assess` can't see). Same evidence axes as an
+        assessment (stance/weight/provenance) but spanning many chunks;
+        `finding_type` becomes a routing label. Must cite real chunks."""
+        return study_mod.create_finding(
+            self._store, study_id=study_id, statement=statement,
+            supporting_chunk_ids=supporting_chunk_ids, stance=stance, weight=weight,
+            agent_id=agent_id, finding_type=finding_type, provenance=provenance,
+            rationale=rationale, model=model,
+        )
+
+    def list_findings(
+        self, study_id: str, *, finding_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Cross-chunk findings for a study (weight-ranked), each with its
+        supporting chunks (id + page). Optional `finding_type` filter."""
+        return study_mod.list_findings(self._store, study_id=study_id, finding_type=finding_type)
+
     def next_unassessed(
         self, study_id: str, *,
         doc_id: str | None = None, section_id: str | None = None,

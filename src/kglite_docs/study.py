@@ -25,6 +25,7 @@ Design notes:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -41,6 +42,7 @@ from kglite_docs.schema import (
     CHUNK,
     CHUNK_TEXT_COL,
     CLAIM_TTL_SECONDS,
+    FINDING,
     HAS_VERIFICATION,
     OF_STUDY,
     PROVENANCE_DEFAULT,
@@ -51,6 +53,7 @@ from kglite_docs.schema import (
     STUDY_CLOSED,
     STUDY_OPEN,
     SUPERSEDES,
+    SUPPORTED_BY,
     USED_CONTEXT,
     VALID_ASSESSMENT_VERDICTS,
     VALID_PROVENANCE,
@@ -175,6 +178,7 @@ def get_study(store: Store, *, study_id: str) -> dict[str, Any] | None:
         return None
     study = rows[0]
     study["tallies"] = _tallies(store, study_id)
+    study["findings"] = list_findings(store, study_id=study_id)
     # Conclusions are Summaries targeting the Study.
     from kglite_docs.enrich import get_summaries
     study["conclusions"] = get_summaries(
@@ -247,7 +251,8 @@ def delete_study(store: Store, *, study_id: str) -> dict[str, Any]:
         "OPTIONAL MATCH (a)-[:HAS_VERIFICATION]->(ae:VerificationEvent) "
         "OPTIONAL MATCH (s)<-[:SUMMARIZES]-(c:Summary) "
         "OPTIONAL MATCH (c)-[:HAS_VERIFICATION]->(ce:VerificationEvent) "
-        "DETACH DELETE s, a, ae, c, ce",
+        "OPTIONAL MATCH (s)<-[:OF_STUDY]-(f:Finding) "
+        "DETACH DELETE s, a, ae, c, ce, f",
         params={"id": study_id},
     )
     # Checkouts reference the study by property, not edge — clean separately.
@@ -780,6 +785,121 @@ def conflicts(store: Store, *, study_id: str) -> dict[str, Any]:
         "conflicts": out,
         "total": len(out),
     }
+
+
+# ─── findings (cross-chunk patterns) ────────────────────────────────────────
+
+
+def create_finding(
+    store: Store,
+    *,
+    study_id: str,
+    statement: str,
+    supporting_chunk_ids: list[str],
+    stance: str,
+    weight: float,
+    agent_id: str,
+    finding_type: str = "",
+    provenance: str = PROVENANCE_DEFAULT,
+    rationale: str = "",
+    model: str = "",
+) -> dict[str, Any]:
+    """Record a **cross-chunk Finding** — a pattern asserted over a *set* of
+    chunks (e.g. "the court treated the parties' non-appearances unequally
+    [A,B,C]"), the unit per-chunk `assess` structurally can't see. Carries the
+    same evidence axes as an Assessment (stance / weight / provenance /
+    rationale) but spans many chunks; `finding_type` (free-text, e.g.
+    `disparate_treatment`) becomes a routing label. A finding must cite real
+    primary text — `supporting_chunk_ids` is required and each chunk must exist."""
+    if not _study_exists(store, study_id):
+        raise InvalidEnumError(f"study not found: {study_id}")
+    if stance not in VALID_STANCES:
+        raise InvalidEnumError(f"invalid stance: {stance!r} (expected one of {sorted(VALID_STANCES)})")
+    if provenance not in VALID_PROVENANCE:
+        raise InvalidEnumError(f"invalid provenance: {provenance!r}")
+    try:
+        weight = float(weight)
+    except (TypeError, ValueError):
+        raise InvalidEnumError(f"weight must be a number in [0,1] (got {weight!r})") from None
+    if not 0.0 <= weight <= 1.0:
+        raise InvalidEnumError(f"weight must be in [0,1] (got {weight})")
+    chunk_ids = [c for c in dict.fromkeys(supporting_chunk_ids) if c]
+    if not chunk_ids:
+        raise InvalidEnumError("a finding must cite supporting_chunk_ids (≥1 chunk)")
+    found = {r["id"] for r in _df_dicts(store.cypher(
+        "MATCH (c:Chunk) WHERE c.id IN $ids RETURN c.id AS id", params={"ids": chunk_ids},
+    ))}
+    missing = [c for c in chunk_ids if c not in found]
+    if missing:
+        raise InvalidEnumError(f"supporting chunk(s) not found: {missing}")
+
+    register_agent(store, agent_id=agent_id)
+    fid = "finding_" + uuid.uuid4().hex[:16]
+    store.upsert_nodes(FINDING, [{
+        "id": fid,
+        "title": statement[:120],
+        "study_id": study_id,
+        "statement": statement,
+        "finding_type": finding_type,
+        "stance": stance,
+        "weight": weight,
+        "provenance": provenance,
+        "rationale": rationale,
+        "supporting_chunk_ids": json.dumps(chunk_ids, ensure_ascii=False),
+        "by_agent": agent_id,
+        "model": model,
+        "created_at": _now(),
+        "verification_status": ASSESSMENT_UNVERIFIED,
+    }])
+    store.upsert_edges(OF_STUDY, [{"src": fid, "dst": study_id}], source_type=FINDING, target_type=STUDY)
+    store.upsert_edges(AUTHORED, [{"src": agent_id, "dst": fid}], source_type=AGENT, target_type=FINDING)
+    store.upsert_edges(
+        SUPPORTED_BY, [{"src": fid, "dst": c} for c in chunk_ids],
+        source_type=FINDING, target_type=CHUNK,
+    )
+    for lbl in (label_for("study.stance", stance),
+                label_for("assessment.provenance", provenance),
+                label_for("finding.type", finding_type) if finding_type else ""):
+        if lbl:
+            store.add_label(FINDING, [fid], lbl)
+    return {
+        "finding_id": fid, "study_id": study_id, "statement": statement,
+        "finding_type": finding_type, "stance": stance, "weight": weight,
+        "provenance": provenance, "supporting_chunk_ids": chunk_ids,
+    }
+
+
+def list_findings(
+    store: Store, *, study_id: str, finding_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Cross-chunk findings for a study (weight-ranked), each with its supporting
+    chunks (id + page). Optional `finding_type` filter (label predicate)."""
+    type_label = ""
+    if finding_type:
+        lbl = label_for("finding.type", finding_type)
+        if lbl:
+            type_label = f":{lbl}"
+    rows = _df_dicts(store.cypher(
+        f"MATCH (f:Finding{type_label})-[:OF_STUDY]->(:Study {{id: $id}}) "
+        "RETURN f.id AS finding_id, f.statement AS statement, f.finding_type AS finding_type, "
+        "f.stance AS stance, f.weight AS weight, f.provenance AS provenance, "
+        "f.rationale AS rationale, f.by_agent AS by_agent, labels(f) AS labels "
+        "ORDER BY f.weight DESC",
+        params={"id": study_id},
+    ))
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        node_labels = r.pop("labels", []) or []
+        r["verification_status"] = _verification_from_labels(node_labels)
+        sup = _df_dicts(store.cypher(
+            "MATCH (f:Finding {id: $fid})-[:SUPPORTED_BY]->(c:Chunk) "
+            "RETURN c.id AS id, c.doc_id AS doc_id, c.page_number AS page "
+            "ORDER BY c.doc_id, c.page_number, c.chunk_index",
+            params={"fid": r["finding_id"]},
+        ))
+        r["supporting"] = sup
+        out.append(r)
+    return out
 
 
 def next_unassessed(
