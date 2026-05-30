@@ -6,6 +6,23 @@ matter** (a real Brazilian litigation, 0.0.6), a multi-agent "draft the brief
 from the graph alone" study, a 103-agent legal-KG/e-discovery literature pass,
 and our own multi-agent trials.
 
+## Landed in 0.0.13 — cross-chunk synthesis & leveled studies
+
+From four 2026-05-30 field reports (`inbox/read/2026-05-30-from-claude-code-*`):
+the per-chunk assess/verify model was *silently* blind to **emergent cross-chunk
+patterns** (disparate treatment, conflicting dispositions) — a confident-
+incomplete conclusion, the dangerous failure for legal work. 0.0.13 closes it on
+generic primitives (legal vocabulary stays a registered data pack):
+
+- a cross-chunk **`Finding`** unit + reviewer-vote **confidence** (`escalation_state`);
+- a **synthesis lifecycle + gate** — `conclude` refuses while blind (recorded
+  override) — plus deterministic **semantic / timeline conflict** detection;
+- **leveled review** (escalation rounds + an extensible **lens registry**, so an
+  un-run lens is a *named* blind spot) and a **completion policy** (`confidence`);
+- **follow-on study recommendations** (`recommend`/`spawn`, `SPAWNED_FROM`);
+- a **timeline/Event layer** + queryable entity-value chunk scalars;
+- the TR-7788 cross-chunk **regression fixture** wired into CI.
+
 ## Vision & guiding principles
 
 kglite-docs is the **agentic document-review spine**: ingest documents, let

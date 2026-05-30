@@ -8,6 +8,7 @@ import pytest
 
 from kglite_docs import Corpus, lenses
 from kglite_docs.errors import InvalidEnumError
+from kglite_docs.testing import make_chunks
 
 # Self-contained test lenses (don't depend on the legal pack's load order).
 lenses.register_lens("tl_detect", prompt="hunt patterns", unit_type="chunk", description="t")
@@ -15,18 +16,7 @@ lenses.register_lens("tl_regrade", prompt="re-grade", unit_type="finding", descr
 
 
 def _chunks(corpus: Corpus, tmp_path: Path, n: int = 6) -> list[str]:
-    p = tmp_path / "d.md"
-    p.write_text(
-        "\n\n".join(
-            f"# Sec {i}\n\nParagraph {i} with several distinct words for chunk {i} here."
-            for i in range(n)
-        ),
-        encoding="utf-8",
-    )
-    corpus.ingest(p, structure_aware=True)
-    return [r["id"] for r in corpus.cypher(
-        "MATCH (c:Chunk:Ready) RETURN c.id AS id ORDER BY c.chunk_index"
-    ).to_list()]
+    return make_chunks(corpus, n)
 
 
 def test_available_lenses_lists_registered(corpus: Corpus) -> None:

@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — regression fixture + test helper
+- **Cross-chunk regression fixture wired into CI.** Adopted
+  `sample_data/cross_chunk_fixture/` (synthetic, anonymized case TR-7788) and a
+  test that locks the whole arc end-to-end: the per-chunk baseline recovers
+  **nothing** (`study_conflicts == 0` — the trap), a synthesis pass recovers
+  F1 (disparate treatment) + F2 (conflicting dispositions) + the omission and
+  passes the fixture's own gold-standard `check()` while leaving the negative
+  control alone, and `conclude` is refused until the study is synthesized.
+- **`kglite_docs.testing.make_chunks(corpus, n)`** — a public helper that
+  deterministically produces `n` chunks (encoding the structure-aware lever short
+  paragraphs otherwise pack into one), de-duping a helper the test suite re-pasted.
+
 ### Added — timeline / Event layer
 - **Queryable entity-value scalars on chunks.** Ingest now stores `date_first`,
   `date_count`, `money_max`, `money_sum`, `money_count` as chunk properties (from

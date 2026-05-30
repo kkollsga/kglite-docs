@@ -9,23 +9,13 @@ import pytest
 
 from kglite_docs import Corpus, classify, schema
 from kglite_docs.errors import InvalidEnumError
+from kglite_docs.testing import make_chunks
 
 schema.register_element_discriminator("chunk.sc_element", {"rulex": "RuleX"})
 
 
 def _chunks(corpus: Corpus, tmp_path: Path, n: int = 4) -> list[str]:
-    p = tmp_path / "d.md"
-    p.write_text(
-        "\n\n".join(
-            f"# Sec {i}\n\nParagraph {i} with several distinct words for chunk {i} here."
-            for i in range(n)
-        ),
-        encoding="utf-8",
-    )
-    corpus.ingest(p, structure_aware=True)
-    return [r["id"] for r in corpus.cypher(
-        "MATCH (c:Chunk:Ready) RETURN c.id AS id ORDER BY c.chunk_index"
-    ).to_list()]
+    return make_chunks(corpus, n)
 
 
 def test_finding_round_trips_with_supporting_chunks(corpus: Corpus, tmp_path: Path) -> None:
