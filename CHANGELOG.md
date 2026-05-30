@@ -27,6 +27,12 @@ breaking changes (called out below).
     everything. Recall-oriented + advisory; domain-specific entity types stay in
     a vertical, not core.
   All surfaced on `get_chunk()`; backward-compatible (re-ingest to populate).
+- **`document("map")` / `Corpus.triage_map()` — one-call corpus orientation.**
+  Aggregates every signal above (chunk counts, the `content_kind` breakdown,
+  boilerplate / low-quality, structured-entity coverage, embedding state,
+  OCR-pending pages) plus a human `summary`, so an agent orients *without reading
+  the corpus* and routes work via the matching label predicates
+  (`MATCH (c:Chunk:Table)`, `:HasMoney`, …). Scope with `doc_id`.
 
 ## [0.0.10] — 2026-05-30
 

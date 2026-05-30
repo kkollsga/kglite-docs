@@ -259,6 +259,22 @@ class CorpusStatus(TypedDict):
     studies: int
 
 
+class TriageMap(TypedDict, total=False):
+    """`Corpus.triage_map()` — aggregated content signals for orientation."""
+
+    chunks: int
+    ready: int
+    embedded: int
+    unembedded: int
+    pending_ocr: int
+    sections: int
+    content_kinds: dict[str, int]
+    boilerplate: int
+    low_quality: int
+    entities: dict[str, int]
+    summary: str
+
+
 class ReviewTicketRow(TypedDict, total=False):
     """One row from `Corpus.list_review_queue()`. Add `target` and
     `events` by going through `Corpus.get_review_ticket()`."""
@@ -507,7 +523,7 @@ __all__ = [
     "GroundingReport", "GroundingSentence",
     "IngestSummary",
     "OcrStatus", "OcrStatusRow",
-    "CoverageReport", "CoverageDocRow", "CorpusStatus",
+    "CoverageReport", "CoverageDocRow", "CorpusStatus", "TriageMap",
     "PendingOcrRow",
     "ReviewEvent", "ReviewStats", "ReviewStatus",
     "ReviewTicketDetail", "ReviewTicketRow", "ReviewVerdict",

@@ -12,6 +12,13 @@ from __future__ import annotations
 from typing import Any
 
 from kglite_docs.ingest.parser import OCR_TEXT_THRESHOLD
+from kglite_docs.schema import (
+    ENTITY_LABELS,
+    LABEL_BOILERPLATE,
+    LABEL_EMBEDDED,
+    LABEL_LOW_QUALITY,
+    LABEL_READY,
+)
 from kglite_docs.store import Store
 from kglite_docs.store import rows as _df_dicts
 
@@ -112,6 +119,63 @@ def corpus_status(store: Store) -> dict[str, Any]:
     }
 
 
-def _count(store: Store, query: str) -> int:
-    r = _df_dicts(store.cypher(query))
+def _count(store: Store, query: str, params: dict[str, Any] | None = None) -> int:
+    r = _df_dicts(store.cypher(query, params=params or {}))
     return int(r[0]["n"]) if r else 0
+
+
+def triage_map(store: Store, *, doc_id: str | None = None) -> dict[str, Any]:
+    """One cheap call that aggregates the deterministic content signals so an
+    agent can orient *without reading the corpus*: chunk counts, the
+    content_kind breakdown, boilerplate / low-quality flags, structured-entity
+    coverage, embedding state, and OCR-pending pages. All from label-indexed
+    counts (fast). Scope with ``doc_id``."""
+    where = "WHERE c.doc_id = $d " if doc_id else ""
+    params: dict[str, Any] = {"d": doc_id} if doc_id else {}
+
+    def lcount(label: str) -> int:
+        return _count(store, f"MATCH (c:Chunk:{label}) {where}RETURN count(c) AS n", params)
+
+    kind_rows = _df_dicts(store.cypher(
+        f"MATCH (c:Chunk:{LABEL_READY}) {where}RETURN c.content_kind AS k, count(c) AS n",
+        params=params,
+    ))
+    content_kinds = {r["k"]: int(r["n"]) for r in kind_rows if r.get("k")}
+    entities = {et: lcount(lbl) for et, lbl in ENTITY_LABELS.items()}
+    entities = {k: v for k, v in entities.items() if v}
+
+    total = _count(store, f"MATCH (c:Chunk) {where}RETURN count(c) AS n", params)
+    ready = lcount(LABEL_READY)
+    embedded = lcount(LABEL_EMBEDDED)
+    boilerplate = lcount(LABEL_BOILERPLATE)
+    low_quality = lcount(LABEL_LOW_QUALITY)
+    pwhere = "WHERE p.doc_id = $d AND " if doc_id else "WHERE "
+    pending_ocr = _count(
+        store, f"MATCH (p:Page) {pwhere}p.needs_ocr = true RETURN count(p) AS n", params,
+    )
+    sections = _count(
+        store, f"MATCH (s:Section) {('WHERE s.doc_id = $d ' if doc_id else '')}RETURN count(s) AS n",
+        params,
+    )
+
+    top = ", ".join(f"{n} {k}" for k, n in sorted(content_kinds.items(), key=lambda kv: -kv[1]))
+    ent = ", ".join(f"{n} {k}" for k, n in entities.items())
+    summary = (
+        f"{total} chunks ({ready} ready, {embedded} embedded); kinds: {top or 'n/a'}; "
+        f"{boilerplate} boilerplate, {low_quality} low-quality; "
+        f"{pending_ocr} page(s) need OCR"
+        + (f"; entities: {ent}" if ent else "")
+    )
+    return {
+        "chunks": total,
+        "ready": ready,
+        "embedded": embedded,
+        "unembedded": ready - embedded,
+        "pending_ocr": pending_ocr,
+        "sections": sections,
+        "content_kinds": content_kinds,
+        "boilerplate": boilerplate,
+        "low_quality": low_quality,
+        "entities": entities,
+        "summary": summary,
+    }

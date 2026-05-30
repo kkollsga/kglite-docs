@@ -121,6 +121,25 @@ def test_ingest_stamps_content_signals(corpus: Corpus, tmp_path: Path) -> None:
     assert d["boilerplate"] is False
 
 
+def test_triage_map_aggregates_signals(corpus: Corpus, tmp_path: Path) -> None:
+    md = tmp_path / "m.md"
+    md.write_text(
+        "# Prose\n\nA normal paragraph of prose with several words for the map test.\n\n"
+        "# Table\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\n"
+        "# Facts\n\nPaid $1,250,000 to ops@acme.com on 2021-03-04 under PAD-003.\n",
+        encoding="utf-8",
+    )
+    doc_id = corpus.ingest(md).doc_id
+    m = corpus.triage_map(doc_id=doc_id)
+    assert m["chunks"] >= 3 and m["ready"] >= 3
+    assert m["content_kinds"].get("prose", 0) >= 1
+    assert m["content_kinds"].get("table", 0) >= 1
+    assert m["entities"].get("money", 0) >= 1
+    assert m["entities"].get("email", 0) >= 1
+    assert m["unembedded"] == m["ready"]  # not indexed in this test
+    assert isinstance(m["summary"], str) and "chunks" in m["summary"]
+
+
 def test_boilerplate_flagged_for_duplicate_chunks(corpus: Corpus, tmp_path: Path) -> None:
     # Verbatim-repeated content (a disclaimer, a repeated page) yields duplicate
     # chunks → flagged boilerplate, but kept (lossless).

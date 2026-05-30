@@ -105,6 +105,13 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         - **`coverage`** — honest extraction + embedding coverage per doc +
           corpus, with a human `summary` (what's image-only / low-text /
           unembedded). Optional `doc_id` to scope.
+        - **`map`** — one-call triage overview so you orient *without reading the
+          corpus*: chunk counts, the `content_kind` breakdown (prose/table/list/
+          code/sparse), boilerplate / low-quality counts, structured-entity
+          coverage (chunks with dates/money/emails/urls/ids), embedding state,
+          and OCR-pending pages, plus a human `summary`. Optional `doc_id`.
+          Route work with the matching label predicates (`MATCH (c:Chunk:Table)`,
+          `MATCH (c:Chunk:HasMoney)`).
 
         Examples::
 
@@ -211,9 +218,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return corpus.status()
         if action == "coverage":
             return corpus.coverage_report(doc_id=doc_id)
+        if action == "map":
+            return corpus.triage_map(doc_id=doc_id)
         raise ValueError(
             f"document(): unknown action {action!r}. Valid: ingest, index, list, "
-            "get, sections, export, compare, status, coverage",
+            "get, sections, map, export, compare, status, coverage",
         )
 
     # ─── chunk ────────────────────────────────────────────────────────────

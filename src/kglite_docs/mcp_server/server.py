@@ -31,8 +31,8 @@ THE INTERFACE IS A PSEUDO-CLI: noun tools, each takes an action
 verb as the first positional arg. Think `git branch list`, not 45
 standalone functions.
 
-  document(action, ...)   ingest | index | list | get | sections | export |
-                          compare | status | coverage
+  document(action, ...)   ingest | index | list | get | sections | map |
+                          export | compare | status | coverage
   chunk(action, ...)      get | similar
   search(query, mode=…)   hits (default) | compose
   study(action, ...)      define | assess | next | ledger | verify |
@@ -55,9 +55,12 @@ afterwards to embed and unlock `search`. Workflows that only browse,
 run cypher, tag, review, OCR, export, or translate need no embeddings —
 skip `index` entirely. (One-shot: `document("ingest", ..., embed=True)`.)
 
-ORIENT FIRST: `document("status")` for a corpus snapshot, `document("coverage")`
+ORIENT FIRST: `document("status")` for a corpus snapshot, `document("map")` for a
+triage overview (content_kind breakdown, boilerplate, low-quality, entity
+coverage — so you route work without reading the corpus), `document("coverage")`
 to see what's image-only/low-text (unanalyzed unless OCR'd) or unembedded —
-coverage is reported as data, never silently assumed. `document("sections",
+all reported as data, never silently assumed. Chunks are pre-tagged with cheap
+deterministic labels: `MATCH (c:Chunk:Table)` / `:HasMoney` / `:Boilerplate` etc. `document("sections",
 doc_id=…)` lists a doc's sections (the grain between document and chunk); pass a
 section's id as `section_id` to scope `study("next"/"ledger")`.
 

@@ -105,6 +105,7 @@ from kglite_docs.types import (
     TagRow,
     TargetKind,
     TranslationStatus,
+    TriageMap,
 )
 
 
@@ -862,6 +863,13 @@ class Corpus:
         (unanalyzed unless OCR'd) and how many chunks are unembedded (search
         blind until `index()`). Pass `doc_id` to scope the per-doc rows."""
         return cast(CoverageReport, coverage_mod.coverage_report(self._store, doc_id=doc_id))
+
+    def triage_map(self, *, doc_id: str | None = None) -> TriageMap:
+        """One cheap call that aggregates the deterministic content signals — the
+        content_kind breakdown, boilerplate / low-quality counts, structured-
+        entity coverage, embedding state, OCR-pending pages — so an agent orients
+        without reading the corpus. Scope with `doc_id`."""
+        return cast(TriageMap, coverage_mod.triage_map(self._store, doc_id=doc_id))
 
     # ─── ocr ──────────────────────────────────────────────────────────────
 
