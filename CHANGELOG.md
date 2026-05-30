@@ -7,6 +7,13 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.8] — 2026-05-30
+
+Release theme: **evidence integrity** — make the assess/verify model legally
+defensible: record *what was checked* not just how strongly, let agents park
+blocked evidence, resolve cross-agent corrections to one current truth, and
+surface the disagreement.
+
 ### Added — evidence integrity
 - **`study("conflicts", study_id)` surfaces contested evidence (FEAT-8).** Returns
   the chunks that have *both* a current `supports` and a current `against`
