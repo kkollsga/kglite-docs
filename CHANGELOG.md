@@ -7,6 +7,14 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.11] — 2026-05-30
+
+Release theme: **agent assist (pre-enrichment)** — a deterministic, zero-LLM
+triage layer so agents spend tokens on judgment, not mechanical work. Cheap
+content signals + structured-entity pre-tagging at ingest, plus a one-call
+corpus map for orientation. Every signal is additive, observable, and advisory —
+never lossy. (Local OCR with a modern engine is the deferred next release.)
+
 ### Dependencies
 - **Adopt kglite 0.10.10** (pin `>=0.10.10`). It ships the fixes for the two
   papercuts we offloaded (KG-1: a node property named `label` is readable again;
