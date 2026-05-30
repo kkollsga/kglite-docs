@@ -896,6 +896,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         target_confidence: float = 0.0,
         required_lenses: list[str] | None = None,
         max_rounds: int = 0,
+        date: str | None = None,
+        actor: str | None = None,
+        event_action: str | None = None,
+        outcome: str | None = None,
+        ruling_type: str = "",
         doc_id: str | None = None,
         section_id: str | None = None,
         element: str | None = None,
@@ -1029,6 +1034,16 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           conclude gate.**
         - **`synthesis_prompt`** — the prompt to read before synthesizing (the
           domain-neutral hunt list + any registered domain addenda).
+        - **`add_event`** — record one timeline event (a dated occurrence) on a
+          document: requires `doc_id`, `date`, `actor`, `event_action`,
+          `outcome`; optional `chunk_id`, `ruling_type`. Read `event_prompt`
+          first. Generic shape — the action/outcome vocabulary is yours.
+        - **`timeline`** — a document's events in chronological order. Requires
+          `doc_id`.
+        - **`timeline_conflicts`** — sequence analysis over the events: disparate
+          treatment (same trigger → different outcome by actor) + contradictory
+          outcomes. Requires `doc_id`; reports how many events were scanned.
+        - **`event_prompt`** — the prompt for extracting timeline events.
         - **`recommend`** — propose follow-on studies this study's findings imply
           (proposals only, never auto-run), each seeded with the triggering
           findings. Requires `study_id`.
@@ -1154,6 +1169,24 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         if action == "synthesis_prompt":
             return {"prompt": corpus.synthesis_prompt()}
+        if action == "add_event":
+            r = corpus.add_event(
+                _require(doc_id, "doc_id", action, "study"),
+                date=_require(date, "date", action, "study"),
+                actor=_require(actor, "actor", action, "study"),
+                action=_require(event_action, "event_action", action, "study"),
+                outcome=_require(outcome, "outcome", action, "study"),
+                chunk_id=chunk_id or "", ruling_type=ruling_type, agent_id=agent_id or "",
+            )
+            _persist(corpus)
+            return r
+        if action == "timeline":
+            return corpus.timeline(_require(doc_id, "doc_id", action, "study"))
+        if action == "timeline_conflicts":
+            return corpus.timeline_conflicts(_require(doc_id, "doc_id", action, "study"))
+        if action == "event_prompt":
+            from kglite_docs.events import EVENT_EXTRACTION_PROMPT
+            return {"prompt": EVENT_EXTRACTION_PROMPT}
         if action == "recommend":
             return corpus.recommend_studies(_require(study_id, "study_id", action, "study"))
         if action == "recommendations":
@@ -1267,5 +1300,6 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             "supersede, next, ledger, conflicts, semantic_conflicts, finding, "
             "findings, verify, synthesize, synthesis_prompt, escalate, next_review, "
             "record_review, close_round, rounds, lenses, confidence, set_policy, "
-            "recommend, recommendations, spawn, conclude, list, get, reopen, delete",
+            "add_event, timeline, timeline_conflicts, event_prompt, recommend, "
+            "recommendations, spawn, conclude, list, get, reopen, delete",
         )

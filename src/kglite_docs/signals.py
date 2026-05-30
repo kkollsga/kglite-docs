@@ -107,6 +107,45 @@ def extract_entities(text: str) -> dict[str, list[str]]:
     return out
 
 
+_MONEY_NUM = re.compile(r"\d[\d.,]*")
+
+
+def money_amount(value: str) -> float | None:
+    """Parse a money string's numeric magnitude (`'$1,250.00'` → `1250.0`).
+    Best-effort + deterministic: treats `,` as a thousands separator when it
+    isn't the decimal point. None if no number is present."""
+    m = _MONEY_NUM.search(value or "")
+    if not m:
+        return None
+    raw = m.group(0)
+    # If both separators appear, the last one is the decimal point.
+    if "," in raw and "." in raw:
+        raw = raw.replace(",", "") if raw.rfind(".") > raw.rfind(",") else raw.replace(".", "").replace(",", ".")
+    elif "," in raw:
+        # A lone comma: decimal if it leaves ≤2 trailing digits, else thousands.
+        raw = raw.replace(",", ".") if len(raw.split(",")[-1]) <= 2 and raw.count(",") == 1 else raw.replace(",", "")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def entity_scalars(entities: dict[str, list[str]]) -> dict[str, object]:
+    """Queryable scalar rollups from extracted entities, so timelines and
+    aggregates work in Cypher (`ORDER BY c.date_first`, `sum(c.money_max)`)
+    without re-parsing `entities_json`. Always returns the full key set (with
+    zero/empty defaults) so chunk columns stay consistent."""
+    dates = entities.get("date") or []
+    amounts = [a for a in (money_amount(v) for v in entities.get("money") or []) if a is not None]
+    return {
+        "date_first": dates[0] if dates else "",
+        "date_count": len(dates),
+        "money_max": max(amounts) if amounts else 0.0,
+        "money_sum": round(sum(amounts), 2) if amounts else 0.0,
+        "money_count": len(amounts),
+    }
+
+
 def text_quality(markdown: str) -> float:
     """A 0..1 heuristic for how clean the extracted text looks (1.0 = clean).
     Low scores flag likely-garbled extraction (bad OCR/encoding). Advisory."""

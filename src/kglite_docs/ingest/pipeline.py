@@ -41,6 +41,7 @@ from kglite_docs.signals import (
     LOW_QUALITY_THRESHOLD,
     char_count,
     classify_content_kind,
+    entity_scalars,
     extract_entities,
     text_quality,
     word_count,
@@ -230,6 +231,7 @@ def ingest_document(
         kind = classify_content_kind(ch.text)
         quality = text_quality(ch.text)
         entities = extract_entities(ch.text)
+        scalars = entity_scalars(entities)
         chunk_rows.append({
             "id": cid,
             "title": (ch.text[:80] + "…") if ch.text else f"[needs ocr] p.{p.page_number}",
@@ -244,6 +246,9 @@ def ingest_document(
             "content_kind": kind,
             "quality_score": quality,
             "entities_json": _safe_json(entities),
+            # Queryable entity-value scalars (date_first/money_max/…) so timelines
+            # and aggregates work in Cypher without re-parsing entities_json.
+            **scalars,
             "boilerplate": False,               # set below by the cross-page pass
             "headings_json": _safe_json(ch.headings),
             "status": status,                   # property still written

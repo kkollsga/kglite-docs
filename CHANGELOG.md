@@ -7,6 +7,21 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — timeline / Event layer
+- **Queryable entity-value scalars on chunks.** Ingest now stores `date_first`,
+  `date_count`, `money_max`, `money_sum`, `money_count` as chunk properties (from
+  the same regex entity pass), so timelines and aggregates work in Cypher
+  (`ORDER BY c.date_first`, `sum(c.money_max)`) without re-parsing
+  `entities_json`.
+- **`Event` layer + sequence analysis.** `study("add_event", …)` records a dated
+  occurrence (`date / actor / action / outcome`, optionally chunk-anchored;
+  `study("event_prompt")` is the extraction prompt); `study("timeline")` returns
+  a document's events in order; `study("timeline_conflicts")` runs deterministic
+  sequence analysis — **disparate treatment** (same trigger → different outcome by
+  actor) and **contradictory outcomes** (same actor+action, conflicting outcomes)
+  — completing the disparate-treatment detector over the ordered record. Reports
+  how many events were scanned (honest coverage).
+
 ### Added — follow-on study recommendations
 - **A concluded study never dead-ends a thread its own findings opened.**
   `study("recommend")` proposes follow-on studies a study's findings imply

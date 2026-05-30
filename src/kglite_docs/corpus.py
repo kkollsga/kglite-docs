@@ -1450,6 +1450,32 @@ class Corpus:
             self._store, recommendation_id=recommendation_id, approved_by=approved_by,
         )
 
+    # ─── timeline / events ─────────────────────────────────────────────────
+
+    def add_event(
+        self, doc_id: str, *, date: str, actor: str, action: str, outcome: str,
+        chunk_id: str = "", ruling_type: str = "", agent_id: str = "",
+    ) -> dict[str, Any]:
+        """Record one timeline event (date/actor/action/outcome) on a document,
+        optionally anchored to the chunk it came from."""
+        from kglite_docs import events as events_mod
+        return events_mod.add_event(
+            self._store, doc_id=doc_id, date=date, actor=actor, action=action,
+            outcome=outcome, chunk_id=chunk_id, ruling_type=ruling_type, agent_id=agent_id,
+        )
+
+    def timeline(self, doc_id: str) -> list[dict[str, Any]]:
+        """A document's events in chronological order."""
+        from kglite_docs import events as events_mod
+        return events_mod.timeline(self._store, doc_id=doc_id)
+
+    def timeline_conflicts(self, doc_id: str) -> dict[str, Any]:
+        """Sequence analysis over a document's events: disparate treatment (same
+        trigger → different outcome by actor) + contradictory outcomes. Reports
+        how many events were scanned (honest coverage)."""
+        from kglite_docs import events as events_mod
+        return events_mod.timeline_conflicts(self._store, doc_id=doc_id)
+
     def list_findings(
         self, study_id: str, *, finding_type: str | None = None,
     ) -> list[dict[str, Any]]:
