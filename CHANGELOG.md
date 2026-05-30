@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — document structure
+- **`Section` nodes + section-scoped studies (FEAT-9).** Ingest now derives
+  `Section` nodes — the grain between document and chunk — from the PDF outline
+  (`doc.get_toc()`) when present, else from top-level heading boundaries (generic,
+  all formats). `(:Document)-[:HAS_SECTION]->(:Section)-[:HAS_CHUNK]->(:Chunk)`;
+  each chunk carries `section_id` (+ a `doc_type` slot verticals can fill).
+  `document("sections", doc_id)` / `Corpus.list_sections()` list them with per-
+  section `chunk_count`; `study("next"/"ledger", section_id=…)` scope the
+  work-list and evidence ledger to one section. `IngestResult.section_count` and
+  `get_chunk().section_id` make the structure observable. Backward-compatible —
+  re-ingest documents from before this release to populate sections.
+
 ## [0.0.8] — 2026-05-30
 
 Release theme: **evidence integrity** — make the assess/verify model legally

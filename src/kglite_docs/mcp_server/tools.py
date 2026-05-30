@@ -82,6 +82,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           translate need no embeddings).
         - **`list`** — list ingested documents. Optional `filters`, `limit`.
         - **`get`** — fetch metadata + heading-derived TOC. Requires `doc_id`.
+        - **`sections`** — the document's sections (the grain between document
+          and chunk, derived from the PDF outline or top-level headings at
+          ingest), in reading order with per-section `chunk_count`. Requires
+          `doc_id`. Use a section's id as `section_id` to scope `study("next")`/
+          `study("ledger")`.
         - **`export`** — write doc to MD / DOCX / PDF. Requires `doc_id`,
           `out_path`; optional `format`, `include_summaries`.
         - **`compare`** — side-by-side cross-doc retrieval. Requires `doc_a`,
@@ -184,13 +189,15 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 max_tokens_per_query=max_tokens_per_query,
                 agent_id=agent_id,
             )
+        if action == "sections":
+            return corpus.list_sections(_require(doc_id, "doc_id", action, "document"))
         if action == "status":
             return corpus.status()
         if action == "coverage":
             return corpus.coverage_report(doc_id=doc_id)
         raise ValueError(
-            f"document(): unknown action {action!r}. "
-            "Valid: ingest, index, list, get, export, compare, status, coverage",
+            f"document(): unknown action {action!r}. Valid: ingest, index, list, "
+            "get, sections, export, compare, status, coverage",
         )
 
     # ─── chunk ────────────────────────────────────────────────────────────
@@ -804,6 +811,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         notes: str = "",
         text: str | None = None,
         doc_id: str | None = None,
+        section_id: str | None = None,
         min_weight: float | None = None,
         verified_only: bool = False,
         include_superseded: bool = False,
@@ -848,13 +856,15 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           **Pass `agent_id` to claim them** — a punchcard checkout that stops
           parallel analysts from grabbing the same chunks; claims auto-expire
           (~30 min) and assessing releases. Without `agent_id` it's a
-          read-only preview. Requires `study_id`; optional `doc_id`, `limit`.
-          For a fan-out, give each analyst the same `study_id` and its own
-          `agent_id` and they'll get disjoint batches.
+          read-only preview. Requires `study_id`; optional `doc_id`,
+          `section_id` (scope to one section — see `document("sections")`),
+          `limit`. For a fan-out, give each analyst the same `study_id` and its
+          own `agent_id` and they'll get disjoint batches.
         - **`ledger`** — weight-ranked evidence + support/against tallies.
           Requires `study_id`; optional `stance` (→ just the supporting or
           contradicting side), `min_weight`, `verified_only`, `doc_id` (scope to
-          one document), `include_superseded` (default false — corrected
+          one document), `section_id` (scope to one section),
+          `include_superseded` (default false — corrected
           assessments are hidden; pass true for the full history), `limit`.
           Reports `total`/`returned` so truncation is visible (`total > returned`
           ⇒ raise `limit` to see the rest).
@@ -927,7 +937,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         if action == "next":
             r = corpus.next_unassessed(
                 _require(study_id, "study_id", action, "study"),
-                doc_id=doc_id, agent_id=agent_id, limit=limit,
+                doc_id=doc_id, section_id=section_id, agent_id=agent_id, limit=limit,
             )
             if agent_id:  # claiming next mutates (writes a checkout) → persist
                 _persist(corpus)
@@ -936,7 +946,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return corpus.study_ledger(
                 _require(study_id, "study_id", action, "study"),
                 stance=stance, min_weight=min_weight,
-                verified_only=verified_only, doc_id=doc_id,
+                verified_only=verified_only, doc_id=doc_id, section_id=section_id,
                 include_superseded=include_superseded, limit=limit,
             )
         if action == "verify":

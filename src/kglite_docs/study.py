@@ -478,6 +478,7 @@ def ledger(
     min_weight: float | None = None,
     verified_only: bool = False,
     doc_id: str | None = None,
+    section_id: str | None = None,
     include_superseded: bool = False,
     limit: int = 200,
 ) -> dict[str, Any]:
@@ -485,7 +486,8 @@ def ledger(
 
     Dedups to the latest assessment per (chunk, agent), ranks by weight DESC.
     `stance` ("supports"/"against"/"neutral"/"deferred") and `verified_only`
-    filter via label predicates; `doc_id` scopes to one document. **Current-by-
+    filter via label predicates; `doc_id`/`section_id` scope to one document or
+    section. **Current-by-
     default:** assessments explicitly superseded (FEAT-5) are hidden unless
     `include_superseded=True` (each row carries a `superseded` flag). Returns
     `rows` plus support/against `tallies`, and — for honest coverage — `total`
@@ -508,12 +510,16 @@ def ledger(
         label_parts += ":" + label_for("assessment.verification_status", "verified")
 
     params: dict[str, Any] = {"id": study_id, "lim": int(limit)}
-    # doc_id filters the chunk *before* the latest-per-(chunk,agent) grouping;
-    # min_weight filters the surviving `latest` *after* it.
-    pre_where = ""
+    # doc_id/section_id filter the chunk *before* the latest-per-(chunk,agent)
+    # grouping; min_weight filters the surviving `latest` *after* it.
+    pre_conds = []
     if doc_id:
-        pre_where = "WHERE c.doc_id = $doc_id"
+        pre_conds.append("c.doc_id = $doc_id")
         params["doc_id"] = doc_id
+    if section_id:
+        pre_conds.append("c.section_id = $section_id")
+        params["section_id"] = section_id
+    pre_where = ("WHERE " + " AND ".join(pre_conds)) if pre_conds else ""
     # Assessments an explicit SUPERSEDES edge points at — hidden by default.
     # (EXISTS{} isn't projectable in a WITH on this engine, so resolve the set
     # up front and filter by id; the ledger already reads latest.id/latest.weight
@@ -653,6 +659,7 @@ def next_unassessed(
     *,
     study_id: str,
     doc_id: str | None = None,
+    section_id: str | None = None,
     agent_id: str | None = None,
     limit: int = 20,
     ttl_seconds: int = CLAIM_TTL_SECONDS,
@@ -678,6 +685,9 @@ def next_unassessed(
     if doc_id:
         chunk_where.append("c.doc_id = $doc")
         base_params["doc"] = doc_id
+    if section_id:
+        chunk_where.append("c.section_id = $sec")
+        base_params["sec"] = section_id
     where_sql = " AND ".join(chunk_where)
     # "Done for this study" = given a *real* (non-deferred) stance as a focal
     # chunk, OR already read as context for another chunk's assessment (so we

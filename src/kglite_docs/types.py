@@ -116,6 +116,20 @@ class DocumentDetail(TypedDict, total=False):
     toc: list[dict[str, Any]]
 
 
+class SectionRow(TypedDict, total=False):
+    """One row from `Corpus.list_sections()` — the grain between document and
+    chunk (derived from the PDF outline or top-level headings at ingest)."""
+
+    id: str
+    doc_id: str
+    title: str
+    page_start: int
+    page_end: int
+    level: int
+    doc_type: str
+    chunk_count: int
+
+
 class ChunkDetail(TypedDict, total=False):
     """`Corpus.get_chunk()` return shape."""
 
@@ -127,6 +141,8 @@ class ChunkDetail(TypedDict, total=False):
     text: str
     token_count: int
     headings: str
+    section_id: str
+    doc_type: str
     status: ChunkStatus
     view_count: int
     next_id: str
@@ -487,6 +503,7 @@ __all__ = [
     "ReviewEvent", "ReviewStats", "ReviewStatus",
     "ReviewTicketDetail", "ReviewTicketRow", "ReviewVerdict",
     "SearchHit",
+    "SectionRow",
     "SummaryDepth", "SummaryRow", "SummaryStatus", "SummaryVerdict",
     "TagKind", "TagRow",
     "TargetKind",

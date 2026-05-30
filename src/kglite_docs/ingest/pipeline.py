@@ -7,10 +7,12 @@ early with `created=False`.
 
 from __future__ import annotations
 
+import bisect
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Final, Protocol
 
 from kglite_docs.ingest.chunker import Chunk, chunk_page
 from kglite_docs.ingest.formats import detect_format, parse_document
@@ -25,9 +27,11 @@ from kglite_docs.schema import (
     DOCUMENT,
     HAS_CHUNK,
     HAS_PAGE,
+    HAS_SECTION,
     LABEL_EMBEDDED,
     NEXT_CHUNK,
     PAGE,
+    SECTION,
     label_for,
 )
 from kglite_docs.store import Store
@@ -49,6 +53,7 @@ class IngestResult:
     ocr_pending_pages: int
     format: str = ""
     embedded: int = 0  # chunks embedded during this ingest (0 unless embed=True)
+    section_count: int = 0  # Section nodes derived from outline/headings
 
 
 def ingest_pdf(
@@ -219,6 +224,16 @@ def ingest_document(
         })
         chunk_ids_by_page.setdefault(p.page_number, []).append(cid)
         chunk_ids_by_status.setdefault(status, []).append(cid)
+
+    # Derive Sections (the middle grain between document and chunk) and stamp
+    # each chunk with its section_id/doc_type *before* the upsert.
+    outline = pages[0].metadata.get("doc_outline") if pages else None
+    section_rows, chunk_section = _derive_sections(doc_id, chunk_rows, outline)
+    for r in chunk_rows:
+        sid, dtype = chunk_section.get(str(r["id"]), ("", ""))
+        r["section_id"] = sid
+        r["doc_type"] = dtype
+
     store.upsert_nodes(CHUNK, chunk_rows)
 
     # Multi-label (kglite 0.10.5): tag each chunk with its status label
@@ -244,6 +259,22 @@ def ingest_document(
     store.upsert_edges(HAS_CHUNK, page_chunk_edges, source_type=PAGE, target_type=CHUNK)
     doc_chunk_edges = [{"src": doc_id, "dst": r["id"]} for r in chunk_rows]
     store.upsert_edges(HAS_CHUNK, doc_chunk_edges, source_type=DOCUMENT, target_type=CHUNK)
+
+    # Sections: Document→Section, Section→Chunk (reusing HAS_CHUNK).
+    if section_rows:
+        store.upsert_nodes(SECTION, section_rows)
+        store.upsert_edges(
+            HAS_SECTION, [{"src": doc_id, "dst": s["id"]} for s in section_rows],
+            source_type=DOCUMENT, target_type=SECTION,
+        )
+        sec_chunk_edges = [
+            {"src": str(r["section_id"]), "dst": str(r["id"])}
+            for r in chunk_rows if r.get("section_id")
+        ]
+        if sec_chunk_edges:
+            store.upsert_edges(
+                HAS_CHUNK, sec_chunk_edges, source_type=SECTION, target_type=CHUNK,
+            )
 
     # NEXT_CHUNK in document reading order across pages
     ordered_ids = [r["id"] for r in chunk_rows]
@@ -282,6 +313,7 @@ def ingest_document(
         ocr_pending_pages=sum(1 for p in pages if p.needs_ocr),
         format=fmt,
         embedded=embedded_count,
+        section_count=len(section_rows),
     )
 
 
@@ -291,6 +323,111 @@ def _page_id(doc_id: str, page_number: int) -> str:
 
 def _chunk_id(doc_id: str, page_number: int, chunk_index: int) -> str:
     return f"{doc_id}#p{page_number}#c{chunk_index}"
+
+
+def _row_page(r: dict[str, object]) -> int:
+    """A chunk row's 1-based page number (0 if missing/non-int)."""
+    v = r.get("page_number")
+    return v if isinstance(v, int) else 0
+
+
+def _top_heading(headings_json: object) -> str | None:
+    """The top-level (first) heading of a chunk, from its headings_json."""
+    if not isinstance(headings_json, str):
+        return None
+    try:
+        hs = json.loads(headings_json)
+    except Exception:
+        return None
+    return str(hs[0]) if isinstance(hs, list) and hs else None
+
+
+def _normalize_outline(outline: object) -> list[tuple[int, str, int]]:
+    """Coerce a `doc.get_toc(simple=True)` result into sorted
+    `(level, title, page)` tuples; `[]` if absent/malformed."""
+    if not isinstance(outline, list):
+        return []
+    entries: list[tuple[int, str, int]] = []
+    for e in outline:
+        if isinstance(e, (list, tuple)) and len(e) >= 3:
+            try:
+                entries.append((int(e[0]), str(e[1]), int(e[2])))
+            except (TypeError, ValueError):
+                continue
+    entries.sort(key=lambda t: t[2])  # by page
+    return entries
+
+
+def _derive_sections(
+    doc_id: str,
+    chunk_rows: list[dict[str, object]],
+    outline: object,
+) -> tuple[list[dict[str, Any]], dict[str, tuple[str, str]]]:
+    """Group chunks into Sections — the grain between document and chunk.
+
+    Prefers the PDF outline (`doc.get_toc`) when present; else falls back to
+    top-level heading boundaries in the chunk stream. Returns `(section_rows,
+    {chunk_id: (section_id, doc_type)})`. Generic + best-effort; `doc_type`
+    defaults to `""` in core (verticals classify it). Page ranges are computed
+    from the chunks actually assigned, so empty outline sections are dropped.
+    """
+    if not chunk_rows:
+        return [], {}
+
+    entries = _normalize_outline(outline)
+    # Per-chunk grouping key + display title + level, in reading order.
+    keyed: list[tuple[dict[str, object], Any, str, int]] = []
+    if entries:
+        starts = [e[2] for e in entries]
+        for r in chunk_rows:
+            pg = _row_page(r)
+            idx = max(0, bisect.bisect_right(starts, pg) - 1)
+            level, title, _pg = entries[idx]
+            keyed.append((r, ("o", idx), title or "(untitled)", level or 1))
+    else:
+        cur = -1
+        prev_top: object = _SECTION_SENTINEL
+        for r in chunk_rows:
+            top = _top_heading(r.get("headings_json"))
+            if top != prev_top:
+                cur += 1
+                prev_top = top
+            keyed.append((r, ("h", cur), top or "(untitled)", 1))
+
+    order: list[Any] = []
+    meta: dict[Any, dict[str, Any]] = {}
+    for r, key, title, level in keyed:
+        pg = _row_page(r)
+        if key not in meta:
+            meta[key] = {"title": title, "level": level, "page_start": pg, "page_end": pg}
+            order.append(key)
+        else:
+            m = meta[key]
+            if pg:
+                m["page_start"] = min(m["page_start"] or pg, pg)
+                m["page_end"] = max(m["page_end"], pg)
+
+    key_to_sid: dict[Any, str] = {}
+    section_rows: list[dict[str, Any]] = []
+    for ordinal, key in enumerate(order):
+        sid = f"{doc_id}#s{ordinal}"
+        key_to_sid[key] = sid
+        m = meta[key]
+        section_rows.append({
+            "id": sid,
+            "doc_id": doc_id,
+            "title": m["title"],
+            "page_start": m["page_start"],
+            "page_end": m["page_end"],
+            "level": m["level"],
+            "doc_type": "",
+            "ordinal": ordinal,
+        })
+    chunk_section = {str(r["id"]): (key_to_sid[key], "") for r, key, _t, _l in keyed}
+    return section_rows, chunk_section
+
+
+_SECTION_SENTINEL: Final = object()
 
 
 def _count_chunks(store: Store, doc_id: str) -> int:

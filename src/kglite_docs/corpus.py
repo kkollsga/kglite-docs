@@ -93,6 +93,7 @@ from kglite_docs.types import (
     ReviewTicketRow,
     ReviewVerdict,
     SearchHit,
+    SectionRow,
     Stance,
     StudyRow,
     StudyStatus,
@@ -435,6 +436,23 @@ class Corpus:
         doc["toc"] = _df_to_dicts(toc_df)
         return cast(DocumentDetail | None, doc)
 
+    def list_sections(self, doc_id: str) -> list[SectionRow]:
+        """Sections of a document (the grain between document and chunk),
+        in reading order, each with its `chunk_count`. Sections are derived at
+        ingest from the PDF outline or top-level headings; re-ingest documents
+        ingested before this feature to populate them."""
+        df = self._store.cypher(
+            "MATCH (d:Document {id: $id})-[:HAS_SECTION]->(s:Section) "
+            "OPTIONAL MATCH (s)-[:HAS_CHUNK]->(c:Chunk) "
+            "WITH s, count(c) AS chunk_count "
+            "RETURN s.id AS id, s.doc_id AS doc_id, s.title AS title, "
+            "s.page_start AS page_start, s.page_end AS page_end, "
+            "s.level AS level, s.doc_type AS doc_type, chunk_count "
+            "ORDER BY s.ordinal",
+            params={"id": doc_id},
+        )
+        return cast(list[SectionRow], _df_to_dicts(df))
+
     # ─── chunks ───────────────────────────────────────────────────────────
 
     def get_chunk(
@@ -453,6 +471,7 @@ class Corpus:
                    c.page_number AS page, c.chunk_index AS chunk_index,
                    c.{CHUNK_TEXT_COL} AS text, c.token_count AS token_count,
                    c.headings_json AS headings, c.status AS status,
+                   c.section_id AS section_id, c.doc_type AS doc_type,
                    c.view_count AS view_count
             """,
             params={"id": chunk_id},
@@ -1136,18 +1155,21 @@ class Corpus:
         self, study_id: str, *,
         stance: Stance | None = None, min_weight: float | None = None,
         verified_only: bool = False, doc_id: str | None = None,
+        section_id: str | None = None,
         include_superseded: bool = False, limit: int = 200,
     ) -> Ledger:
         """Weight-ranked evidence ledger for a study + support/against tallies.
         Pass `stance="supports"`/`"against"` to retrieve just that side, or
-        `doc_id=` to scope to one document. Current-by-default: superseded
-        assessments are hidden unless `include_superseded=True` (each row carries
-        a `superseded` flag). The result reports `total` (matches before `limit`)
-        and `returned`; `total > returned` means it was clipped."""
+        `doc_id=`/`section_id=` to scope to one document or section.
+        Current-by-default: superseded assessments are hidden unless
+        `include_superseded=True` (each row carries a `superseded` flag). The
+        result reports `total` (matches before `limit`) and `returned`; `total >
+        returned` means it was clipped."""
         return cast(Ledger, study_mod.ledger(
             self._store, study_id=study_id, stance=stance,
             min_weight=min_weight, verified_only=verified_only,
-            doc_id=doc_id, include_superseded=include_superseded, limit=limit,
+            doc_id=doc_id, section_id=section_id,
+            include_superseded=include_superseded, limit=limit,
         ))
 
     def verify_assessment(
@@ -1192,15 +1214,17 @@ class Corpus:
 
     def next_unassessed(
         self, study_id: str, *,
-        doc_id: str | None = None, agent_id: str | None = None, limit: int = 20,
+        doc_id: str | None = None, section_id: str | None = None,
+        agent_id: str | None = None, limit: int = 20,
         ttl_seconds: int = 1800,
     ) -> list[dict[str, Any]]:
         """Work-list of chunks not yet assessed for this study. When
         ``agent_id`` is given, atomically *claims* (checks out) the returned
         chunks so parallel analysts don't overlap; without it, a read-only
-        preview. Claims auto-expire after ``ttl_seconds``."""
+        preview. `doc_id`/`section_id` scope the work-list. Claims auto-expire
+        after ``ttl_seconds``."""
         return study_mod.next_unassessed(
-            self._store, study_id=study_id, doc_id=doc_id,
+            self._store, study_id=study_id, doc_id=doc_id, section_id=section_id,
             agent_id=agent_id, limit=limit, ttl_seconds=ttl_seconds,
         )
 

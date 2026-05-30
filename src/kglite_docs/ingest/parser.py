@@ -73,6 +73,13 @@ def parse_pdf(path: str | Path) -> list[PageContent]:
 
     out: list[PageContent] = []
     with pymupdf.open(str(path)) as doc:
+        # Document-level outline (bookmarks) — the most authoritative section
+        # boundaries when present. Ride it out on the first page's metadata so
+        # the list[PageContent] contract is unchanged.
+        try:
+            outline = doc.get_toc(simple=True) or []
+        except Exception:  # pragma: no cover - defensive (malformed outline)
+            outline = []
         for i, page_md in enumerate(md_pages):
             page = doc[i]
             markdown = (page_md.get("text") or "").strip()
@@ -96,6 +103,8 @@ def parse_pdf(path: str | Path) -> list[PageContent]:
                     },
                 )
             )
+    if out and outline:
+        out[0].metadata["doc_outline"] = outline
     return out
 
 

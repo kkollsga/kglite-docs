@@ -12,6 +12,7 @@ from typing import Final
 # Node types
 DOCUMENT: Final = "Document"
 PAGE: Final = "Page"
+SECTION: Final = "Section"
 CHUNK: Final = "Chunk"
 SUMMARY: Final = "Summary"
 TAG: Final = "Tag"
@@ -28,6 +29,7 @@ CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
 # Edge types
 HAS_PAGE: Final = "HAS_PAGE"
+HAS_SECTION: Final = "HAS_SECTION"            # Document → Section (Section → Chunk reuses HAS_CHUNK)
 HAS_CHUNK: Final = "HAS_CHUNK"
 NEXT_CHUNK: Final = "NEXT_CHUNK"
 IN_CLUSTER: Final = "IN_CLUSTER"
