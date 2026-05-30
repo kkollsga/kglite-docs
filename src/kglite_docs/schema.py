@@ -193,6 +193,14 @@ LABEL_SPARSE: Final = "Sparse"
 LABEL_LOW_QUALITY: Final = "LowQuality"   # text looks garbled (bad OCR/encoding)
 LABEL_BOILERPLATE: Final = "Boilerplate"  # repeated header/footer across pages
 
+# Domain element-classification markers (core; the element *values* are supplied
+# by a domain schema via register_element_discriminator).
+CLASSIFY_DONE: Final = "classified"
+CLASSIFY_NONE: Final = "unclassified"
+LABEL_CLASSIFIED: Final = "Classified"
+LABEL_UNCLASSIFIED: Final = "Unclassified"
+LABEL_CONTESTED: Final = "Contested"      # multi-agent classification divergence
+
 # Structured-entity presence flags (multi-valued → independent labels, not a
 # discriminator): `MATCH (c:Chunk:HasMoney)`.
 LABEL_HAS_DATE: Final = "HasDate"
@@ -283,6 +291,13 @@ _CHUNK_CONTENT_KIND_LABELS: Final[dict[str, str]] = {
     CONTENT_SPARSE: LABEL_SPARSE,
 }
 
+# Classification lifecycle marker (one-of-N via swap_label): a ready chunk is
+# either Classified or Unclassified — exhaustive, so the work-list never leaks.
+_CHUNK_CLASSIFY_LABELS: Final[dict[str, str]] = {
+    CLASSIFY_DONE: LABEL_CLASSIFIED,
+    CLASSIFY_NONE: LABEL_UNCLASSIFIED,
+}
+
 _STUDY_STANCE_LABELS: Final[dict[str, str]] = {
     STANCE_SUPPORTS: LABEL_SUPPORTS,
     STANCE_AGAINST: LABEL_AGAINST,
@@ -354,6 +369,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "chunk.status": _CHUNK_STATUS_LABELS,
     "chunk.embedding": _CHUNK_EMBED_LABELS,
     "chunk.content_kind": _CHUNK_CONTENT_KIND_LABELS,
+    "chunk.classify": _CHUNK_CLASSIFY_LABELS,
     "summary.verification_status": _SUMMARY_STATUS_LABELS,
     "review.status": _REVIEW_STATUS_LABELS,
     "translation.status": _TRANSLATION_STATUS_LABELS,
@@ -365,20 +381,68 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
 }
 
 
+# ─── Domain element-classification registry ───────────────────────────────
+# Built-in discriminators above are frozen. Domain schemas (e.g. the legal data
+# pack) register *element* discriminators at import — kept in a separate mutable
+# registry so the literal stays `Final`. Core never names a domain term; it only
+# routes opaque element tokens. Element values are unique across all registered
+# element discriminators, so a flat `element="holding"` lookup is unambiguous.
+_REGISTERED: dict[str, dict[str, str]] = {}
+_ELEMENT_DISCRIMINATORS: set[str] = set()
+_ELEMENT_VALUE_LABELS: dict[str, str] = {}  # element value → label, flat union
+
+
+def register_element_discriminator(name: str, mapping: dict[str, str]) -> None:
+    """Register a domain element discriminator (value → label). Idempotent for an
+    identical re-registration; raises on a conflicting redefinition or on an
+    element value already owned by another element discriminator (values are
+    globally unique so `element="…"` routing is unambiguous)."""
+    if name in _DISCRIMINATOR_MAPS:
+        raise ValueError(f"{name!r} is a built-in discriminator, not registrable")
+    existing = _REGISTERED.get(name)
+    if existing is not None:
+        if existing == mapping:
+            return  # idempotent
+        raise ValueError(f"element discriminator {name!r} already registered differently")
+    for value, label in mapping.items():
+        owner = _ELEMENT_VALUE_LABELS.get(value)
+        if owner is not None and owner != label:
+            raise ValueError(
+                f"element value {value!r} already registered (as {owner!r}); "
+                "element values must be unique across element discriminators"
+            )
+    _REGISTERED[name] = dict(mapping)
+    _ELEMENT_DISCRIMINATORS.add(name)
+    _ELEMENT_VALUE_LABELS.update(mapping)
+
+
+def valid_element_values() -> frozenset[str]:
+    """Every element value registered by a domain schema. The allow-list a
+    study's `element=` scope is validated against (unknown ⇒ raise, never a
+    silent zero-match)."""
+    return frozenset(_ELEMENT_VALUE_LABELS)
+
+
+def element_label(value: str) -> str | None:
+    """Label for a registered element value, or `None` if it isn't registered.
+    Callers MUST raise on `None` rather than fall back to PascalCase — an
+    unknown/skewed element token must never silently match zero chunks."""
+    return _ELEMENT_VALUE_LABELS.get(value)
+
+
 def label_for(discriminator: str, value: str) -> str:
     """Canonical label name for a user-supplied discriminator value.
 
-    `discriminator` is one of the keys in `_DISCRIMINATOR_MAPS`. For
-    free-text discriminators not in the map (notably `'agent.role'`),
-    falls back to PascalCase of the value (`'reviewer'` → `'Reviewer'`,
-    `'fact-checker'` → `'FactChecker'`).
+    `discriminator` is a key in `_DISCRIMINATOR_MAPS` or a registered element
+    discriminator. For free-text discriminators not in either (notably
+    `'agent.role'`), falls back to PascalCase of the value (`'reviewer'` →
+    `'Reviewer'`, `'fact-checker'` → `'FactChecker'`).
 
-    Empty / missing values return `""` so callers can guard with truthy
-    checks.
+    Empty / missing values return `""` so callers can guard with truthy checks.
     """
     if not value:
         return ""
-    table = _DISCRIMINATOR_MAPS.get(discriminator)
+    table = _DISCRIMINATOR_MAPS.get(discriminator) or _REGISTERED.get(discriminator)
     if table is not None:
         mapped = table.get(value)
         if mapped is not None:
@@ -392,5 +456,5 @@ def labels_for(discriminator: str) -> tuple[str, ...]:
     """Every label name produced by a discriminator. Used by state
     transitions that need to remove any prior label of the same kind
     before adding a new one."""
-    table = _DISCRIMINATOR_MAPS.get(discriminator)
+    table = _DISCRIMINATOR_MAPS.get(discriminator) or _REGISTERED.get(discriminator)
     return tuple(table.values()) if table else ()

@@ -7,6 +7,19 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — multi-study routing (element classification)
+- **Extensible element-discriminator registry (core primitive).** A domain schema
+  can now register element discriminators (`register_element_discriminator(name,
+  {value: label})`) — the seam for classifying chunks into a controlled vocabulary
+  so many studies route to their relevant chunks instead of re-scanning the
+  corpus. Core stays domain-opaque: it routes opaque element tokens and validates
+  them against the registered allow-list (`valid_element_values()` /
+  `element_label()` — unknown tokens resolve to `None` so callers raise rather
+  than silently match zero chunks). Adds the `Classified`/`Unclassified`/
+  `Contested` markers + a `chunk.classify` discriminator. (Inert until the classify
+  pass + legal data pack land in later phases; the legal vocabulary ships as
+  registered data, never hard-coded in core.)
+
 ## [0.0.11] — 2026-05-30
 
 Release theme: **agent assist (pre-enrichment)** — a deterministic, zero-LLM
