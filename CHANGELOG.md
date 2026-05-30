@@ -7,6 +7,12 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.9] — 2026-05-30
+
+Release theme: **document structure** — a middle grain between document and
+chunk. Sections (from the PDF outline or headings), section-scoped studies,
+pinpoint char-span cites on assessments, and opt-in structure-aware chunking.
+
 ### Added — document structure
 - **Structure-aware chunking (FEAT-10).** `ingest(..., structure_aware=True)` (and
   `document("ingest", structure_aware=True)`) starts a fresh chunk at every
