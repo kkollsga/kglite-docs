@@ -25,12 +25,12 @@ Design notes:
 
 from __future__ import annotations
 
-import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, cast
 
 from kglite_docs.activity import register_agent
+from kglite_docs.checkout import claim_or_preview
 from kglite_docs.errors import InvalidEnumError, SelfVerificationError
 from kglite_docs.schema import (
     AGENT,
@@ -38,13 +38,10 @@ from kglite_docs.schema import (
     ASSESSMENT,
     ASSESSMENT_UNVERIFIED,
     AUTHORED,
-    CHECKED_OUT,
-    CHECKOUT,
     CHUNK,
     CHUNK_TEXT_COL,
     CLAIM_TTL_SECONDS,
     HAS_VERIFICATION,
-    HOLDS,
     OF_STUDY,
     PROVENANCE_DEFAULT,
     STANCE_AGAINST,
@@ -84,12 +81,6 @@ _PROVENANCE_LABEL_SET = set(labels_for("assessment.provenance"))
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-# Serialises the GC→select→claim sequence so concurrent in-process `next`
-# calls don't hand the same chunks to two agents. (Cross-process safety
-# comes from the claim being persisted: a second server reload sees it.)
-_checkout_lock = threading.Lock()
 
 
 # ─── studies ────────────────────────────────────────────────────────────────
@@ -806,51 +797,12 @@ def next_unassessed(
         "AND NOT EXISTS { MATCH (c)<-[:USED_CONTEXT]-(:Assessment)-[:OF_STUDY]->(:Study {id: $sid}) }"
     )
 
-    # Preview mode: just show unassessed chunks; don't claim, don't mutate.
-    if not agent_id:
-        df = store.cypher(
-            f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} "
-            "RETURN c.id AS id, c.doc_id AS doc_id, c.page_number AS page, "
-            "c.chunk_index AS chunk_index, c.text AS text, c.title AS title "
-            "ORDER BY c.doc_id, c.page_number, c.chunk_index LIMIT $lim",
-            params=base_params,
-        )
-        return _df_dicts(df)
-
-    # Claim mode: GC stale checkouts → select unassessed & unclaimed → punch.
-    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)).isoformat()
-    not_claimed = (
-        "NOT EXISTS { MATCH (c)<-[:CHECKED_OUT]-(:Checkout {study_id: $sid}) }"
+    # Claim (agent_id) or preview, via the shared punchcard — keyed on the study
+    # id so study claims stay disjoint from the classification work-list.
+    return claim_or_preview(
+        store, where_sql=where_sql, not_done=not_done, base_params=base_params,
+        checkout_key=study_id, agent_id=agent_id, ttl_seconds=ttl_seconds,
     )
-    with _checkout_lock:
-        # Expire abandoned checkouts (older than the TTL) for this study.
-        store.cypher(
-            "MATCH (co:Checkout) WHERE co.study_id = $sid AND co.at < $cutoff DETACH DELETE co",
-            params={"sid": study_id, "cutoff": cutoff},
-        )
-        rows = _df_dicts(store.cypher(
-            f"MATCH (c:Chunk) WHERE {where_sql} AND {not_done} AND {not_claimed} "
-            "RETURN c.id AS id, c.doc_id AS doc_id, c.page_number AS page, "
-            "c.chunk_index AS chunk_index, c.text AS text, c.title AS title "
-            "ORDER BY c.doc_id, c.page_number, c.chunk_index LIMIT $lim",
-            params=base_params,
-        ))
-        if rows:
-            register_agent(store, agent_id=agent_id)
-            co_id = "co_" + uuid.uuid4().hex[:16]
-            store.upsert_nodes(CHECKOUT, [{
-                "id": co_id, "title": f"checkout {agent_id} {study_id}",
-                "study_id": study_id, "by_agent": agent_id, "at": _now(),
-            }])
-            store.upsert_edges(
-                HOLDS, [{"src": agent_id, "dst": co_id}],
-                source_type=AGENT, target_type=CHECKOUT,
-            )
-            store.upsert_edges(
-                CHECKED_OUT, [{"src": co_id, "dst": r["id"]} for r in rows],
-                source_type=CHECKOUT, target_type=CHUNK,
-            )
-    return rows
 
 
 # ─── internals ────────────────────────────────────────────────────────────

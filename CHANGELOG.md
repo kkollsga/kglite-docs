@@ -19,6 +19,16 @@ breaking changes (called out below).
   `Contested` markers + a `chunk.classify` discriminator. (Inert until the classify
   pass + legal data pack land in later phases; the legal vocabulary ships as
   registered data, never hard-coded in core.)
+- **`classify.py` — one-pass element classification + punchcard.** `next_unclassified`
+  hands out ready-but-unclassified chunks in reading order (claiming them per agent
+  when `agent_id` is given), reusing the study punchcard via a new shared
+  `checkout.py` keyed on a classify **sentinel** so classify and study fan-outs
+  never collide. `classify_chunk`/`classify_many` write the validated element
+  labels (add-only, recall-safe routing) + the canonical `element_types_json`
+  record, and mark every chunk `:Classified` xor `:Unclassified` (exhaustive — the
+  work-list never leaks). Two agents disagreeing add `:Contested` (never a silent
+  clobber). `study.next_unassessed`'s checkout logic was extracted to the shared
+  `checkout.py` (behavior-preserving).
 
 ## [0.0.11] — 2026-05-30
 
