@@ -7,6 +7,16 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.14] — 2026-05-30
+
+*Scanned primary evidence stops hiding. A field report found the strongest fact
+in a case — the opposing party's sworn confession on a scanned page — invisible
+out of the box: the page was mis-flagged `ready`, never queued, never OCR'd. This
+release makes scans detectable, makes OCR a lazy agent-driven step, and adds a
+source-party dimension so an admission against interest surfaces as the adverse
+party's own primary text. Agent-first throughout; bring-your-own OCR engines
+deferred.*
+
 ### Added — source-party dimension (whose words a document holds)
 - **Tag a document with who produced/filed it**, inherited to its chunks, so an
   *admission against interest* (primary text by the **adverse** party) surfaces
