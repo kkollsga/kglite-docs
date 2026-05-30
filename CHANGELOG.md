@@ -7,6 +7,23 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — leveled review: escalation rounds + lens registry
+- **Spend review effort where it moves the needle.** `study("escalate", …)`
+  opens a `ReviewRound` and hands back only its targeted worklist — never a blind
+  re-run: `scope="contested"`/`"low_depth"` returns the *findings* that need more
+  reviewers; `scope="uncovered"` returns study chunks **not yet examined by a
+  given `lens`** (a detectability sweep). `study("next_review")` claims a
+  non-overlapping batch (punchcard keyed on the round); `study("record_review")`
+  writes the `EXAMINED` coverage edge and, for a finding, casts the reviewer vote
+  (updating confidence/escalation_state); `study("close_round")` counts the
+  findings it produced. `study("rounds")` is the escalation history.
+- **Lens registry** (`lenses.py`, `study("lenses")`) — a lens is a named reviewer
+  strategy (prompt + unit type). A generic open seam: core ships it empty; the
+  legal pack registers `contradiction / disparity / omission / quantitative /
+  temporal`. A *registered-but-un-run* lens becomes a named blind spot rather
+  than a silent gap. Findings can carry an `origin_round_id` linking them to the
+  round that surfaced them.
+
 ### Added — semantic (cross-chunk) conflict detection
 - **`study("semantic_conflicts")`** — a deterministic scan that clusters
   non-neutral assessments by their **classified element/topic** and flags

@@ -27,6 +27,7 @@ ASSESSMENT: Final = "Assessment"
 FINDING: Final = "Finding"  # a cross-chunk pattern asserted over a SET of chunks
 VERIFICATION_EVENT: Final = "VerificationEvent"
 SYNTHESIS_EVENT: Final = "SynthesisEvent"  # a ledger-wide pattern pass (or its acknowledged skip)
+REVIEW_ROUND: Final = "ReviewRound"  # one escalation pass (a level/kind/lens over a unit set)
 CHECKOUT: Final = "Checkout"  # punchcard: a batch of chunks claimed by an agent
 
 # Edge types
@@ -56,6 +57,9 @@ USED_CONTEXT: Final = "USED_CONTEXT"          # Assessment → Chunk (neighbors 
 SUPERSEDES: Final = "SUPERSEDES"              # Assessment → Assessment (the one it replaces)
 SUPPORTED_BY: Final = "SUPPORTED_BY"          # Finding → Chunk (the chunks a cross-chunk pattern rests on)
 HAS_SYNTHESIS_EVENT: Final = "HAS_SYNTHESIS_EVENT"  # Study → SynthesisEvent
+HAS_ROUND: Final = "HAS_ROUND"                # Study → ReviewRound
+CONDUCTED_BY: Final = "CONDUCTED_BY"          # ReviewRound → Agent
+EXAMINED: Final = "EXAMINED"                  # ReviewRound → Chunk|Finding (the coverage record)
 
 # Punchcard lease: a checkout older than this is treated as abandoned and
 # its chunks become claimable again (and are GC'd on the next claim).
@@ -246,6 +250,22 @@ LABEL_SYNTHESIS_PENDING: Final = "SynthesisPending"
 LABEL_SYNTHESIS_DONE: Final = "SynthesisDone"
 VALID_SYNTHESIS_STATUS: Final = frozenset({SYNTHESIS_PENDING, SYNTHESIS_DONE})
 
+# Review round — one escalation pass. `kind` is a fixed taxonomy; `lens` is an
+# open registry (see lenses.py), so lens is a property, not a discriminator.
+ROUND_SCORE: Final = "score"
+ROUND_VERIFY: Final = "verify"
+ROUND_SYNTHESIZE: Final = "synthesize"
+ROUND_PANEL: Final = "panel"
+ROUND_EXPERT: Final = "expert"
+VALID_ROUND_KINDS: Final = frozenset(
+    {ROUND_SCORE, ROUND_VERIFY, ROUND_SYNTHESIZE, ROUND_PANEL, ROUND_EXPERT}
+)
+ROUND_OPEN: Final = "open"
+ROUND_DONE: Final = "done"
+LABEL_ROUND_OPEN: Final = "RoundOpen"
+LABEL_ROUND_DONE: Final = "RoundDone"
+VALID_ROUND_SCOPES: Final = frozenset({"contested", "low_depth", "uncovered", "all"})
+
 # Assessment verification → labels (Unverified/Verified/Disputed reuse the
 # summary label *names*; Duplicate is study-specific)
 LABEL_DUPLICATE: Final = "Duplicate"
@@ -353,6 +373,11 @@ _STUDY_SYNTHESIS_LABELS: Final[dict[str, str]] = {
     SYNTHESIS_DONE: LABEL_SYNTHESIS_DONE,
 }
 
+_ROUND_STATUS_LABELS: Final[dict[str, str]] = {
+    ROUND_OPEN: LABEL_ROUND_OPEN,
+    ROUND_DONE: LABEL_ROUND_DONE,
+}
+
 _ASSESSMENT_STATUS_LABELS: Final[dict[str, str]] = {
     ASSESSMENT_UNVERIFIED: LABEL_UNVERIFIED,
     ASSESSMENT_VERIFIED: LABEL_VERIFIED,
@@ -414,6 +439,7 @@ _DISCRIMINATOR_MAPS: Final[dict[str, dict[str, str]]] = {
     "study.stance": _STUDY_STANCE_LABELS,
     "study.status": _STUDY_STATUS_LABELS,
     "study.synthesis_status": _STUDY_SYNTHESIS_LABELS,
+    "round.status": _ROUND_STATUS_LABELS,
     "assessment.verification_status": _ASSESSMENT_STATUS_LABELS,
     "assessment.provenance": _ASSESSMENT_PROVENANCE_LABELS,
     "finding.escalation_state": _FINDING_ESCALATION_LABELS,

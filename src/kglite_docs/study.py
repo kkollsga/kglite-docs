@@ -349,7 +349,8 @@ def delete_study(store: Store, *, study_id: str) -> dict[str, Any]:
         "OPTIONAL MATCH (s)<-[:OF_STUDY]-(f:Finding) "
         "OPTIONAL MATCH (f)-[:HAS_VERIFICATION]->(fe:VerificationEvent) "
         "OPTIONAL MATCH (s)-[:HAS_SYNTHESIS_EVENT]->(se:SynthesisEvent) "
-        "DETACH DELETE s, a, ae, c, ce, f, fe, se",
+        "OPTIONAL MATCH (s)-[:HAS_ROUND]->(rr:ReviewRound) "
+        "DETACH DELETE s, a, ae, c, ce, f, fe, se, rr",
         params={"id": study_id},
     )
     # Checkouts reference the study by property, not edge — clean separately.
@@ -993,6 +994,7 @@ def create_finding(
     provenance: str = PROVENANCE_DEFAULT,
     rationale: str = "",
     model: str = "",
+    origin_round_id: str = "",
 ) -> dict[str, Any]:
     """Record a **cross-chunk Finding** — a pattern asserted over a *set* of
     chunks (e.g. "the court treated the parties' non-appearances unequally
@@ -1040,8 +1042,15 @@ def create_finding(
         "model": model,
         "created_at": _now(),
         "verification_status": ASSESSMENT_UNVERIFIED,
+        "origin_round_id": origin_round_id,
     }])
     store.upsert_edges(OF_STUDY, [{"src": fid, "dst": study_id}], source_type=FINDING, target_type=STUDY)
+    if origin_round_id:
+        # A finding surfaced by a leveled round — record the round's coverage edge.
+        store.upsert_edges(
+            "EXAMINED", [{"src": origin_round_id, "dst": fid}],
+            source_type="ReviewRound", target_type=FINDING,
+        )
     store.upsert_edges(AUTHORED, [{"src": agent_id, "dst": fid}], source_type=AGENT, target_type=FINDING)
     store.upsert_edges(
         SUPPORTED_BY, [{"src": fid, "dst": c} for c in chunk_ids],

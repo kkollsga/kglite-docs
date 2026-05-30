@@ -883,6 +883,15 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         statement: str | None = None,
         supporting_chunk_ids: list[str] | None = None,
         finding_type: str = "",
+        origin_round_id: str = "",
+        kind: str | None = None,
+        lens: str | None = None,
+        scope: str = "contested",
+        reviewers: int = 1,
+        level: int | None = None,
+        round_id: str | None = None,
+        target_id: str | None = None,
+        target_kind: str = "finding",
         doc_id: str | None = None,
         section_id: str | None = None,
         element: str | None = None,
@@ -983,6 +992,24 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           checked, recorded on the event). Verifying a finding recomputes its
           escalation_state (settled / contested / needs_more). Self-verification
           is rejected.
+        - **`escalate`** — open a leveled **review round** and get only its
+          targeted worklist. Requires `study_id`, `kind`
+          (score/verify/synthesize/panel/expert), `agent_id`; optional `scope`
+          (`contested`/`low_depth` → findings to re-review; `uncovered`/`all` →
+          chunks for a detectability `lens`), `lens`, `reviewers`, `level`. Never
+          a blind re-run — settled work is untouched.
+        - **`next_review`** — claim uncovered chunks for a detectability round's
+          lens (punchcard keyed on the round). Requires `round_id`; with
+          `agent_id` claims, else previews.
+        - **`record_review`** — record that a round examined a unit (coverage)
+          and, for a finding with a `verdict`, cast the reviewer vote. Requires
+          `round_id`, `target_id`, `agent_id`; optional `target_kind`
+          (`finding`/`chunk`), `verdict`, `provenance`.
+        - **`close_round`** — close a round (counts findings it produced).
+          Requires `round_id`.
+        - **`rounds`** — a study's escalation history. Requires `study_id`.
+        - **`lenses`** — analytical lenses available to escalate (a registered
+          lens that hasn't run is a *named* blind spot, not a silent gap).
         - **`synthesize`** — mark the cross-chunk **synthesis pass** as run (the
           second altitude above per-chunk assess: hunt disparate treatment,
           contradictions, omissions, aggregations — record each as a `finding`).
@@ -1133,7 +1160,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 weight=_require(weight, "weight", action, "study"),
                 agent_id=_require(agent_id, "agent_id", action, "study"),
                 finding_type=finding_type, provenance=provenance or "primary_text",
-                rationale=rationale, model=model,
+                rationale=rationale, model=model, origin_round_id=origin_round_id,
             )
             _persist(corpus)
             return r
@@ -1142,6 +1169,41 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 _require(study_id, "study_id", action, "study"),
                 finding_type=finding_type or None,
             )
+        if action == "escalate":
+            r = corpus.escalate_study(
+                _require(study_id, "study_id", action, "study"),
+                kind=_require(kind, "kind", action, "study"),
+                created_by=_require(agent_id, "agent_id", action, "study"),
+                level=level, lens=lens, reviewers=reviewers, scope=scope, limit=limit,
+            )
+            _persist(corpus)
+            return r
+        if action == "next_review":
+            r = corpus.next_review(
+                _require(round_id, "round_id", action, "study"),
+                agent_id=agent_id, limit=limit,
+            )
+            if agent_id:
+                _persist(corpus)
+            return r
+        if action == "record_review":
+            r = corpus.record_review(
+                _require(round_id, "round_id", action, "study"),
+                _require(target_id, "target_id", action, "study"),
+                target_kind=target_kind, verdict=verdict,
+                agent_id=_require(agent_id, "agent_id", action, "study"),
+                notes=notes, provenance=provenance,
+            )
+            _persist(corpus)
+            return r
+        if action == "close_round":
+            r = corpus.close_round(_require(round_id, "round_id", action, "study"))
+            _persist(corpus)
+            return r
+        if action == "rounds":
+            return corpus.list_rounds(_require(study_id, "study_id", action, "study"))
+        if action == "lenses":
+            return corpus.available_lenses()
         if action == "list":
             return corpus.list_studies(status=status, created_by=created_by)
         if action == "get":
@@ -1160,6 +1222,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         raise ValueError(
             f"study(): unknown action {action!r}. Valid: define, assess, assess_many, "
             "supersede, next, ledger, conflicts, semantic_conflicts, finding, "
-            "findings, verify, synthesize, synthesis_prompt, conclude, list, get, "
+            "findings, verify, synthesize, synthesis_prompt, escalate, next_review, "
+            "record_review, close_round, rounds, lenses, conclude, list, get, "
             "reopen, delete",
         )

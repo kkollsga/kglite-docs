@@ -23,6 +23,7 @@ from kglite_docs import export as export_mod
 from kglite_docs import ocr as ocr_mod
 from kglite_docs import quality as quality_mod
 from kglite_docs import review as review_mod
+from kglite_docs import rounds as rounds_mod
 from kglite_docs import study as study_mod
 from kglite_docs import translate as translate_mod
 from kglite_docs.activity import (
@@ -1346,17 +1347,71 @@ class Corpus:
         self, study_id: str, *, statement: str, supporting_chunk_ids: list[str],
         stance: Stance, weight: float, agent_id: str, finding_type: str = "",
         provenance: Provenance = "primary_text", rationale: str = "", model: str = "",
+        origin_round_id: str = "",
     ) -> dict[str, Any]:
         """Record a cross-chunk Finding — a pattern asserted over a *set* of
         chunks (what per-chunk `assess` can't see). Same evidence axes as an
         assessment (stance/weight/provenance) but spanning many chunks;
-        `finding_type` becomes a routing label. Must cite real chunks."""
+        `finding_type` becomes a routing label. Must cite real chunks.
+        `origin_round_id` links a finding surfaced by a leveled round."""
         return study_mod.create_finding(
             self._store, study_id=study_id, statement=statement,
             supporting_chunk_ids=supporting_chunk_ids, stance=stance, weight=weight,
             agent_id=agent_id, finding_type=finding_type, provenance=provenance,
-            rationale=rationale, model=model,
+            rationale=rationale, model=model, origin_round_id=origin_round_id,
         )
+
+    # ─── leveled review (escalation rounds) ────────────────────────────────
+
+    def escalate_study(
+        self, study_id: str, *, kind: str, created_by: str, level: int | None = None,
+        lens: str | None = None, reviewers: int = 1, scope: str = "contested",
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Open a review round and return only its targeted worklist — more
+        reviewers on contested/low-depth findings (accuracy), or study chunks not
+        yet seen by `lens` (detectability). Never a blind re-run."""
+        return rounds_mod.escalate_study(
+            self._store, study_id=study_id, kind=kind, created_by=created_by,
+            level=level, lens=lens, reviewers=reviewers, scope=scope, limit=limit,
+        )
+
+    def next_review(
+        self, round_id: str, *, agent_id: str | None = None,
+        limit: int = 20, ttl_seconds: int = 1800,
+    ) -> list[dict[str, Any]]:
+        """Uncovered chunks for a detectability round's lens; with `agent_id`,
+        atomically claims a non-overlapping batch (punchcard keyed on the round)."""
+        return rounds_mod.next_review(
+            self._store, round_id=round_id, agent_id=agent_id,
+            limit=limit, ttl_seconds=ttl_seconds,
+        )
+
+    def record_review(
+        self, round_id: str, target_id: str, *, target_kind: str = "finding",
+        verdict: str | None = None, agent_id: str, notes: str = "",
+        provenance: Provenance | None = None,
+    ) -> dict[str, Any]:
+        """Record that a round examined a unit (coverage) and, for a finding with
+        a verdict, cast the reviewer vote (updates confidence/escalation_state)."""
+        return rounds_mod.record_review(
+            self._store, round_id=round_id, target_id=target_id, target_kind=target_kind,
+            verdict=verdict, agent_id=agent_id, notes=notes, provenance=provenance,
+        )
+
+    def close_round(self, round_id: str) -> dict[str, Any]:
+        """Close a round (counts the findings it produced; marks it done)."""
+        return rounds_mod.close_round(self._store, round_id=round_id)
+
+    def list_rounds(self, study_id: str) -> list[dict[str, Any]]:
+        """A study's review rounds, oldest first (the escalation history)."""
+        return rounds_mod.list_rounds(self._store, study_id=study_id)
+
+    def available_lenses(self) -> list[dict[str, Any]]:
+        """Registered analytical lenses (name + unit_type + description) an
+        escalation can run. Empty until a schema pack registers them."""
+        from kglite_docs.lenses import available_lenses, lens_info
+        return [{"name": n, **lens_info(n)} for n in available_lenses()]
 
     def list_findings(
         self, study_id: str, *, finding_type: str | None = None,

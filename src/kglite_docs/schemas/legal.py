@@ -138,3 +138,43 @@ register_element_discriminator("chunk.legal_evidence", LEGAL_EVIDENCE)
 from kglite_docs.synthesis import register_synthesis_addendum  # noqa: E402
 
 register_synthesis_addendum(SYNTHESIS_ADDENDUM)
+
+# Analytical lenses for leveled review (escalate detectability — each names a
+# class of defect to hunt over a unit type). Registering them means an un-run
+# one shows up as a *named* blind spot in study_confidence, not a silent gap.
+from kglite_docs.lenses import register_lens  # noqa: E402
+
+register_lens(
+    "contradiction", unit_type="finding",
+    description="Two operative outcomes that can't both stand.",
+    prompt="Re-examine: do two rulings/decisions in the record assert "
+           "contradictory operative outcomes (e.g. a case extinguished without "
+           "merits, then condemned on the merits)? Cite both.",
+)
+register_lens(
+    "disparity", unit_type="finding",
+    description="Like situations resolved differently by party.",
+    prompt="Re-examine: did the court treat like situations (non-appearance, "
+           "breach, a request) differently depending on the party? Same trigger "
+           "→ different outcome by subject is disparate treatment.",
+)
+register_lens(
+    "omission", unit_type="chunk",
+    description="A pleaded argument/evidence the court never addressed.",
+    prompt="Scan for an argument, defense, item of evidence, or pleaded request "
+           "that was raised but never ruled on or addressed — an unanswered "
+           "point (due-process angle). Record each as a finding.",
+)
+register_lens(
+    "quantitative", unit_type="chunk",
+    description="Sums/totals that only appear by aggregating across chunks.",
+    prompt="Scan for amounts, counts, dates, or deadlines whose sum/sequence "
+           "reveals an inconsistency or total no single chunk states "
+           "(reconciliation, timeline impossibility).",
+)
+register_lens(
+    "temporal", unit_type="chunk",
+    description="Ordering/timeline impossibilities across dated events.",
+    prompt="Scan dated events for ordering impossibilities or deadlines that "
+           "could not have been met given the sequence in the record.",
+)
