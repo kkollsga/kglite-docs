@@ -232,14 +232,22 @@ Make `get_chunk` return a typed `ChunkDetail` with both attribute and
 
 # Part C — Offloaded to the parent kglite library
 
-Defects in kglite's Cypher engine, **re-verified on kglite 0.10.9**. Posted to
-the kglite inbox; we adopt the fix on their next release (no kglite-docs change
-needed). **We do not work around these in kglite-docs.**
+Defects in kglite's Cypher engine, reported to the kglite inbox; we adopt the
+fix on their next release (no kglite-docs change needed). **We do not work around
+these in kglite-docs.** Both **fixed in kglite 0.10.10** (pin bumped to
+`>=0.10.10`), with regression tests upstream.
 
-| ID | Issue (0.10.9) | Status |
+| ID | Issue | Status |
 |----|----------------|--------|
-| KG-1 | A node **property named `label` is shadowed** — `RETURN n.label` returns the node's *type string*, not the property. | `OFFLOADED` (reported) |
-| KG-2 | **`CONTAINS` cannot be a relationship type** (reserved operator) — `CREATE (a)-[:CONTAINS]->(b)` is a syntax error. | `OFFLOADED` (reported) |
+| KG-1 | A node **property named `label` is shadowed** — `RETURN n.label` returns the node's *type string*, not the property. | `RESOLVED` (kglite 0.10.10 — property-first reads) |
+| KG-2 | **`CONTAINS` cannot be a relationship type** (reserved operator) — `CREATE (a)-[:CONTAINS]->(b)` is a syntax error. | `RESOLVED` (kglite 0.10.10 — reserved keywords usable as names) |
+
+> Bonus from the 0.10.10 sweep: a `strip_prefix_to_u32` id-coercion bug in
+> ≤0.10.9 could collide `prefix+number` string ids (`a1`/`reader-1` → `1`) — which
+> our **user-supplied agent ids** can be. Fixed in 0.10.10 (verified: `a1`,
+> `reader-1`, `x1` resolve to distinct nodes); another reason the pin requires it.
+> The one 0.10.10 breaking change (Wikidata prefixed-id `n.id` string→int) does
+> **not** affect us — our ids are non-coercible sha/uuid/composite strings.
 
 **Re-verified as ALREADY FIXED on 0.10.9** but **still passed to kglite** (with
 a "did not reproduce on 0.10.9" caveat, so they can confirm regression coverage
@@ -249,9 +257,9 @@ most importantly — **cypher-`CREATE`d edges now survive save→load**. Our own
 study edges were never exposed (we use the bulk `add_connections` API), and we
 confirmed assess→save→reopen→ledger is intact on 0.10.9.
 
-> Workarounds while KG-1/KG-2 are open: don't name a chunk/section property
-> `label` (use `doc_type` etc.); don't name an edge type `CONTAINS` (use
-> `HAS_SECTION`). FEAT-9 already follows both.
+> Our existing code already dodged both (no property named `label`; edges use
+> `HAS_SECTION`/`HAS_CHUNK`, never `CONTAINS`), so adopting 0.10.10 needed no
+> code change — just the pin bump and a full-suite re-verify (195 green).
 
 ---
 

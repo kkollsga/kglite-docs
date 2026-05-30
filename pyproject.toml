@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Text Processing :: Indexing",
 ]
 dependencies = [
-    "kglite>=0.10.9",
+    "kglite>=0.10.10",
     "mcp>=1.0",
     "mcp-methods>=0.3.40",
     "pymupdf4llm>=0.0.17",

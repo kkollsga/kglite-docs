@@ -7,6 +7,17 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Dependencies
+- **Adopt kglite 0.10.10** (pin `>=0.10.10`). It ships the fixes for the two
+  papercuts we offloaded (KG-1: a node property named `label` is readable again;
+  KG-2: `CONTAINS` usable as a relationship type) — both of which we already
+  dodged, so no code change was needed; full suite re-verified green (195) on
+  0.10.10. It also fixes a `prefix+number` id-coercion bug (`a1`/`reader-1` could
+  collide to the same node) that could affect **user-supplied agent ids** — a
+  correctness reason to require it. The one 0.10.10 breaking change (Wikidata
+  prefixed-id `n.id` string→int) does not touch us (our ids are non-coercible
+  sha/uuid/composite strings).
+
 ### Added — agent assist (pre-enrichment)
 - **Deterministic content signals at ingest (FEAT — agent assist).** Ingest now
   precomputes cheap, model-free triage signals on every chunk so agents spend
