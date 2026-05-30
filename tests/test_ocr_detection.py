@@ -27,12 +27,12 @@ def test_extractable_alnum_ignores_image_placeholders() -> None:
 
 def test_needs_ocr_decision() -> None:
     # image page whose only "text" is a placeholder → OCR
-    assert _needs_ocr(_MARKER, has_images=True) is True
-    assert _needs_ocr("", has_images=True) is True
+    assert _needs_ocr(_MARKER, has_images=True, image_coverage=0.0) is True
+    assert _needs_ocr("", has_images=True, image_coverage=0.0) is True
     # genuine text page (even with an image) → not OCR
-    assert _needs_ocr(_REAL, has_images=True) is False
-    # no image → never OCR (a sparse text-only page isn't a scan)
-    assert _needs_ocr(_MARKER, has_images=False) is False
+    assert _needs_ocr(_REAL, has_images=True, image_coverage=0.0) is False
+    # no image and no coverage → never OCR (a sparse text-only page isn't a scan)
+    assert _needs_ocr(_MARKER, has_images=False, image_coverage=0.0) is False
 
 
 def _image_only_pdf(out: Path) -> Path:

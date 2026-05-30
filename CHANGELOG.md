@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Fixed — robust OCR-requirement detection
+- **Scanned pages stop silently passing as `ready`.** A field report found the
+  single strongest fact in a case — the opposing party's sworn confession on a
+  scanned page — invisible because the page was mis-flagged `ready` and never
+  queued for OCR. Detection is now image-**coverage**- and density-aware (not
+  presence + an absolute char floor): a page is flagged `needs_ocr` when it's
+  image-bearing with sparse text **or** image-dominated without being text-rich —
+  catching full-page scans whose raster isn't a detected XObject, and scans whose
+  junk fragments clear the old 120-char floor. Recall-biased (over-flagging a
+  figure page is cheap; missing an exhibit is not). `PageContent` now carries
+  `image_coverage`.
+
 ## [0.0.13] — 2026-05-30
 
 *Cross-chunk synthesis & leveled studies — from four 2026-05-30 field reports.

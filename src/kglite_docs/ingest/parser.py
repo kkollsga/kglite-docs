@@ -22,6 +22,15 @@ import pymupdf4llm
 # and/or a short footer); a genuine text page yields hundreds+.
 OCR_TEXT_THRESHOLD = 120
 
+# Image-area fraction of a page that counts as "image-bearing" / "image-dominated".
+# Detection is recall-biased: missing a scanned exhibit (the silent miss) is far
+# costlier than over-flagging a figure page (the agent just OCRs it cheaply).
+COVER_MIN = 0.5       # enough image area to treat sparse text as needing OCR
+COVER_DOMINANT = 0.6  # an image-dominated page (likely a full-page scan)
+# A genuine text page yields hundreds+ of real alnum chars; below this on an
+# image-dominated page is treated as a scan whose "text" is junk OCR-able later.
+TEXT_RICH = 400
+
 # pymupdf4llm emits placeholders like `==> picture … intentionally omitted <==`
 # for image regions; these are not real extractable text.
 _IMG_PLACEHOLDER_RE = re.compile(r"(?is)==>.*?<==")
@@ -39,10 +48,40 @@ def _extractable_alnum(markdown: str) -> int:
     return sum(1 for c in cleaned if c.isalnum())
 
 
-def _needs_ocr(markdown: str, has_images: bool) -> bool:
-    """True when a page has image content but negligible real text — i.e. a
-    scanned/image-only page that must be OCR'd to be analyzed."""
-    return has_images and _extractable_alnum(markdown) < OCR_TEXT_THRESHOLD
+def _image_coverage(page: Any) -> float:
+    """Fraction of the page area covered by raster images (0..1). Catches scans
+    whose raster isn't reported as an embedded XObject by `get_images`, and lets
+    us judge a page *image-dominated* rather than merely *image-bearing*."""
+    try:
+        infos = page.get_image_info()
+    except Exception:  # pragma: no cover - defensive (odd page objects)
+        return 0.0
+    area = abs(float(page.rect.width) * float(page.rect.height)) or 1.0
+    covered = 0.0
+    for info in infos:
+        bbox = info.get("bbox") if isinstance(info, dict) else None
+        if not bbox:
+            continue
+        x0, y0, x1, y1 = bbox
+        covered += abs((x1 - x0) * (y1 - y0))
+    return min(covered / area, 1.0)
+
+
+def _needs_ocr(markdown: str, *, has_images: bool, image_coverage: float) -> bool:
+    """True when a page is a scan/image-only page that must be OCR'd to be
+    analyzed. Density- + coverage-aware (recall-biased) so the failure modes that
+    let scanned exhibits silently pass as `ready` are caught:
+
+    - **sparse text on an image-bearing page** — the original rule, now also
+      tripped by image *coverage* (a full-page raster with no detected XObject);
+    - **image-dominated but not text-rich** — a full-page scan whose junk
+      fragments clear the sparse floor (>120 chars) is still a scan.
+    """
+    alnum = _extractable_alnum(markdown)
+    if alnum < OCR_TEXT_THRESHOLD and (has_images or image_coverage >= COVER_MIN):
+        return True
+    # image-dominated but not text-rich → a full-page scan with junk fragments
+    return image_coverage >= COVER_DOMINANT and alnum < TEXT_RICH
 
 
 @dataclass
@@ -57,6 +96,7 @@ class PageContent:
     width_pt: float
     height_pt: float
     image_block_count: int = 0
+    image_coverage: float = 0.0  # fraction of page area covered by raster images
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -93,16 +133,20 @@ def parse_pdf(path: str | Path) -> list[PageContent]:
             has_text = bool(markdown)
             image_block_count = len(page.get_images(full=False))
             has_images = image_block_count > 0
+            image_coverage = _image_coverage(page)
             out.append(
                 PageContent(
                     page_number=i + 1,
                     markdown=markdown,
                     has_text=has_text,
                     has_images=has_images,
-                    needs_ocr=_needs_ocr(markdown, has_images),
+                    needs_ocr=_needs_ocr(
+                        markdown, has_images=has_images, image_coverage=image_coverage,
+                    ),
                     width_pt=float(page.rect.width),
                     height_pt=float(page.rect.height),
                     image_block_count=image_block_count,
+                    image_coverage=image_coverage,
                     metadata={
                         k: v
                         for k, v in page_md.items()
