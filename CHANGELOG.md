@@ -7,6 +7,15 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Fixed
+- **Text pages no longer silently dropped when pymupdf4llm yields empty
+  markdown.** Some PDFs structure poorly enough that `pymupdf4llm.to_markdown`
+  returns an empty page even though the page has extractable text; that page
+  became a silent `:Empty` chunk (and, with no raster images, wasn't even flagged
+  `needs_ocr`) — readable text lost with no signal. `parse_pdf` now falls back to
+  raw PyMuPDF `page.get_text()` when the markdown is empty, recovering the text as
+  a normal ready chunk. Honest coverage: content we *can* read is never dropped.
+
 ### Added — scale & polish
 - **Result/detail ergonomics + MCP surface review (FEAT-14).** `corpus.cypher()`
   returns kglite's `ResultView` — now documented as iterable (`for row in res`,

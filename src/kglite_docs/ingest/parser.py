@@ -83,6 +83,13 @@ def parse_pdf(path: str | Path) -> list[PageContent]:
         for i, page_md in enumerate(md_pages):
             page = doc[i]
             markdown = (page_md.get("text") or "").strip()
+            if not markdown:
+                # pymupdf4llm sometimes returns empty markdown for a page it
+                # can't structure even though the page *has* extractable text.
+                # Fall back to raw PyMuPDF extraction so that text isn't silently
+                # dropped as an :Empty chunk (and mis-classified as not-needing-
+                # OCR because there are no raster images). Honest coverage.
+                markdown = (page.get_text("text") or "").strip()
             has_text = bool(markdown)
             image_block_count = len(page.get_images(full=False))
             has_images = image_block_count > 0

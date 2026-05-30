@@ -27,9 +27,9 @@ def _make_outlined_pdf(out: Path) -> Path:
     ]
     for body in bodies:
         page = doc.new_page()
-        # Repeat + wrap into a textbox so pymupdf4llm reliably extracts the page
-        # (a single short line can come back empty).
-        page.insert_textbox(pymupdf.Rect(72, 72, 520, 760), (body + " ") * 6, fontsize=11)
+        # A single line that pymupdf4llm returns as empty markdown — the parser's
+        # raw-text fallback must recover it (else these pages drop to :Empty).
+        page.insert_text((72, 72), body)
     doc.set_toc([[1, "Introduction", 1], [1, "Methods", 2], [1, "Results", 3]])
     doc.save(str(out))
     doc.close()

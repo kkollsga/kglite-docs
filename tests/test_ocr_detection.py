@@ -56,6 +56,35 @@ def test_image_only_pdf_page_flagged_needs_ocr(corpus: Corpus, tmp_path: Path) -
     assert corpus.ocr_status()["pending_pages"] >= 1
 
 
+def _markdown_empty_but_has_text_pdf(out: Path) -> Path:
+    """A page whose text pymupdf4llm returns as empty markdown, but which has
+    real extractable text via raw PyMuPDF — the silent-:Empty fragility."""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text(
+        (72, 72),
+        "Introduction. Dense passage retrieval encodes a passage into a single "
+        "vector for semantic search over large corpora of documents.",
+    )
+    doc.save(str(out))
+    doc.close()
+    return out
+
+
+def test_raw_text_fallback_recovers_dropped_page(corpus: Corpus, tmp_path: Path) -> None:
+    """When pymupdf4llm yields empty markdown for a page that has text, the raw
+    PyMuPDF fallback recovers it — a ready chunk, not a silent :Empty one."""
+    pdf = _markdown_empty_but_has_text_pdf(tmp_path / "fragile.pdf")
+    r = corpus.ingest(pdf)
+    assert r.created is True
+    assert r.ocr_pending_pages == 0          # text page, not a scan
+    ready = corpus.cypher(
+        "MATCH (c:Chunk:Ready) WHERE c.doc_id = $d RETURN c.text AS t",
+        params={"d": r.doc_id},
+    ).to_list()
+    assert ready and "Dense passage retrieval" in ready[0]["t"]
+
+
 def test_real_text_pdf_not_over_flagged(corpus: Corpus, tmp_path: Path) -> None:
     sample = Path("sample_data/subset/dpr.pdf")
     if not sample.exists():
