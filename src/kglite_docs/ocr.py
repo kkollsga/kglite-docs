@@ -260,6 +260,7 @@ def request_ocr(
     agent_id: str,
     agent_type: str = "",
     dpi: int = 200,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Lazy, agent-driven OCR. The first time an agent asks for a `needs_ocr`
     page, hand it the OCR **task** to perform itself — the rendered page (base64
@@ -268,10 +269,13 @@ def request_ocr(
 
     Identify the page by `page_id`, or by `doc_id` + `page_number`. Raises if the
     page isn't found, isn't flagged `needs_ocr` (nothing to OCR), or its source
-    file is missing. `agent_type` is echoed (and recorded) so an orchestrator can
-    route the task to a specific OCR subagent — the library never dispatches it
-    (agent-first). The request is recorded on the page (who/when/agent_type;
-    first request preserved) for an audit trail."""
+    file is missing. Pass `force=True` to **re-OCR an already-transcribed page**
+    — e.g. to escalate an illegible/partial result to a stronger model
+    (`ocr("illegible")` → re-`request_ocr(force=True)` → re-`submit_ocr`); the new
+    submit replaces the page's chunks. `agent_type` is echoed (and recorded) so an
+    orchestrator can route the task to a specific OCR subagent — the library never
+    dispatches it (agent-first). The request is recorded on the page
+    (who/when/agent_type; first request preserved) for an audit trail."""
     params: dict[str, Any]
     if page_id:
         where, params = "p.id = $pid", {"pid": page_id}
@@ -288,10 +292,11 @@ def request_ocr(
     if not rows:
         raise InvalidEnumError(f"page not found: {page_id or f'{doc_id} p.{page_number}'}")
     r = rows[0]
-    if not r.get("needs_ocr"):
+    if not r.get("needs_ocr") and not force:
         raise InvalidEnumError(
             f"page {r['page_id']} is not flagged needs_ocr — nothing to OCR "
-            "(it already has extractable text)."
+            "(it already has extractable text). Pass force=True to re-OCR it "
+            "anyway (e.g. to escalate an illegible result to a stronger model)."
         )
     doc_path = r.get("doc_path") or ""
     if not doc_path or not Path(doc_path).exists():

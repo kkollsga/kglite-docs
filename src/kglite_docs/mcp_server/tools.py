@@ -730,6 +730,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
         dpi: int = 200,
         model: str = "",
         confidence: float | None = None,
+        force: bool = False,
     ) -> Any:
         """OCR pipeline (for scanned/image pages flagged `needs_ocr`).
         kglite-docs ships NO OCR engine — you (a vision-capable agent) are the
@@ -750,7 +751,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           empty text. Identify by `page_id` or `doc_id`+`page_number`; requires
           `agent_id`. Pass `agent_type` to route the task to a specific OCR
           subagent (echoed back; you dispatch it). Raises if the page isn't
-          flagged `needs_ocr`.
+          flagged `needs_ocr` — pass `force=true` to re-OCR an already-done page
+          (escalate an `illegible` result to a stronger model); the next `submit`
+          replaces its chunks.
         - **`submit`** — patch your transcription back into a page; re-chunks +
           re-embeds and marks the chunks `ocr_derived`. Requires `page_id`,
           `markdown`, `agent_id`.
@@ -779,7 +782,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             r = corpus.request_ocr(
                 page_id=page_id, doc_id=doc_id, page_number=page_number,
                 agent_id=_require(agent_id, "agent_id", action, "ocr"),
-                agent_type=agent_type, dpi=dpi,
+                agent_type=agent_type, dpi=dpi, force=force,
             )
             _persist(corpus)
             return r

@@ -7,6 +7,13 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — re-OCR an already-done page (`force`)
+- **`ocr("request", …, force=true)`** re-OCRs a page that's already transcribed —
+  so an `illegible`/`partial` result can be escalated to a stronger model
+  (`ocr("illegible")` → re-request with `force` → re-submit). `submit_ocr` now
+  replaces **all** of a page's chunks (not just the `needs_ocr` placeholders), so
+  a re-OCR overwrites cleanly instead of leaving duplicate chunks.
+
 ### Fixed — silent illegibility: "OCR'd" ≠ "readable"
 - **A page OCR'd to all-`[ilegível]`/empty no longer counts as covered.** A
   full-corpus run found ~25% of OCR'd pages came back illegible/near-empty, yet

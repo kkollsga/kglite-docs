@@ -45,6 +45,31 @@ def test_illegible_submit_is_surfaced_not_covered(corpus: Corpus, tmp_path: Path
     assert "illegible" in corpus.coverage_report()["summary"].lower()
 
 
+def test_force_reocr_replaces_chunks(corpus: Corpus, tmp_path: Path) -> None:
+    import pytest
+
+    from kglite_docs.errors import InvalidEnumError
+    _scan(tmp_path / "s.pdf")
+    corpus.ingest(tmp_path / "s.pdf")
+    pid = corpus.list_pending_ocr(include_images=False)[0]["page_id"]
+    # First OCR: illegible.
+    corpus.submit_ocr(pid, "[ilegível]", agent_id="sonnet")
+    assert corpus.list_illegible_pages()[0]["page_id"] == pid
+    # Without force, the page is no longer needs_ocr → request refuses.
+    with pytest.raises(InvalidEnumError, match="force=True"):
+        corpus.request_ocr(page_id=pid, agent_id="opus")
+    # Force re-OCR (escalate to a stronger model) → task again.
+    task = corpus.request_ocr(page_id=pid, agent_id="opus", force=True)
+    assert task["image_b64"]
+    # Re-submit replaces the prior chunk (no duplicates) and clears illegibility.
+    corpus.submit_ocr(pid, "# Recovered\n\n" + ("Clear legible ruling text here. " * 8),
+                      agent_id="opus", model="opus")
+    n = corpus.cypher("MATCH (p:Page {id:$p})-[:HAS_CHUNK]->(c:Chunk) RETURN count(c) AS n",
+                      params={"p": pid}).to_list()[0]["n"]
+    assert n == 1  # replaced, not duplicated
+    assert corpus.ocr_status()["readable_pages"] == 1 and corpus.list_illegible_pages() == []
+
+
 def test_legible_submit_counts_as_readable(corpus: Corpus, tmp_path: Path) -> None:
     _scan(tmp_path / "s.pdf")
     corpus.ingest(tmp_path / "s.pdf")

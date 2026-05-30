@@ -975,15 +975,17 @@ class Corpus:
     def request_ocr(
         self, *, page_id: str | None = None, doc_id: str | None = None,
         page_number: int | None = None, agent_id: str, agent_type: str = "",
-        dpi: int = 200,
+        dpi: int = 200, force: bool = False,
     ) -> dict[str, Any]:
         """Lazy OCR: hand back the OCR task (rendered page + verbatim prompt) for
         a `needs_ocr` page so the agent transcribes it and calls `submit_ocr`.
         Identify by `page_id` or `doc_id`+`page_number`; `agent_type` is echoed so
-        an orchestrator can route to a specific OCR subagent."""
+        an orchestrator can route to a specific OCR subagent. `force=True` re-OCRs
+        an already-transcribed page (escalate an illegible result to a stronger
+        model) — the new submit replaces the page's chunks."""
         return ocr_mod.request_ocr(
             self._store, page_id=page_id, doc_id=doc_id, page_number=page_number,
-            agent_id=agent_id, agent_type=agent_type, dpi=dpi,
+            agent_id=agent_id, agent_type=agent_type, dpi=dpi, force=force,
         )
 
     def submit_ocr(
