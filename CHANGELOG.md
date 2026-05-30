@@ -7,6 +7,14 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.10] — 2026-05-30
+
+Release theme: **scale & polish** — single-writer guardrails (advisory lock +
+`assess_many`), opt-in summary-augmented chunking, result/detail ergonomics and
+an MCP surface review, plus a raw-text fallback so no readable page is silently
+dropped. End-to-end integration tests now exercise the 0.0.7–0.0.10 feature set
+together on the real embedder.
+
 ### Fixed
 - **Text pages no longer silently dropped when pymupdf4llm yields empty
   markdown.** Some PDFs structure poorly enough that `pymupdf4llm.to_markdown`
