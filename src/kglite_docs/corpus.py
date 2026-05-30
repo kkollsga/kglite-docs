@@ -1334,6 +1334,14 @@ class Corpus:
         opposing rows split by side."""
         return cast(ConflictReport, study_mod.conflicts(self._store, study_id=study_id))
 
+    def study_semantic_conflicts(self, study_id: str) -> dict[str, Any]:
+        """**Cross-chunk** contradictions: within a classified element/topic,
+        different chunks carrying opposing stances (the disparate-treatment /
+        conflicting-disposition class same-chunk `study_conflicts` can't see).
+        Reports honest coverage (`checked` vs `skipped_unclassified`); needs
+        chunks classified into an element schema first."""
+        return study_mod.semantic_conflicts(self._store, study_id=study_id)
+
     def create_finding(
         self, study_id: str, *, statement: str, supporting_chunk_ids: list[str],
         stance: Stance, weight: float, agent_id: str, finding_type: str = "",

@@ -7,6 +7,16 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Added — semantic (cross-chunk) conflict detection
+- **`study("semantic_conflicts")`** — a deterministic scan that clusters
+  non-neutral assessments by their **classified element/topic** and flags
+  *different* chunks carrying opposing stances (one ruling `supports`, a
+  conflicting ruling `against`) — the disparate-treatment / conflicting-
+  disposition class same-chunk `conflicts` is structurally blind to. Honest
+  coverage: reports `checked` (classified assessed chunks) vs
+  `skipped_unclassified`, and when nothing is classified returns a loud `note`
+  ("not looked", not a falsely-clean zero) recommending `tag("classify")` first.
+
 ### Added — synthesis lifecycle + honest-completeness gate
 - **A study can no longer be silently concluded while blind to cross-chunk
   patterns.** The lifecycle is now `score → verify → synthesize → conclude`.

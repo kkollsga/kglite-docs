@@ -959,6 +959,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           `supports` and `against` assessment, each with its opposing rows (most
           contested first). Requires `study_id`. Read these first — that's where
           the disagreement is.
+        - **`semantic_conflicts`** — **cross-chunk** contradictions: within a
+          classified element/topic, different chunks with opposing stances (the
+          disparate-treatment / conflicting-disposition class `conflicts` can't
+          see). Requires `study_id` + chunks classified via `tag("classify")`;
+          reports honest coverage (`checked` vs `skipped_unclassified`).
         - **`finding`** — record a **cross-chunk** pattern (what per-chunk
           `assess` can't see: disparate treatment, conflicting rulings, …).
           Requires `study_id`, `statement`, `supporting_chunk_ids=[…]` (the real
@@ -1115,6 +1120,9 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         if action == "conflicts":
             return corpus.study_conflicts(_require(study_id, "study_id", action, "study"))
+        if action == "semantic_conflicts":
+            return corpus.study_semantic_conflicts(
+                _require(study_id, "study_id", action, "study"))
         if action == "finding":
             r = corpus.create_finding(
                 _require(study_id, "study_id", action, "study"),
@@ -1151,6 +1159,7 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             return r
         raise ValueError(
             f"study(): unknown action {action!r}. Valid: define, assess, assess_many, "
-            "supersede, next, ledger, conflicts, finding, findings, verify, "
-            "synthesize, synthesis_prompt, conclude, list, get, reopen, delete",
+            "supersede, next, ledger, conflicts, semantic_conflicts, finding, "
+            "findings, verify, synthesize, synthesis_prompt, conclude, list, get, "
+            "reopen, delete",
         )

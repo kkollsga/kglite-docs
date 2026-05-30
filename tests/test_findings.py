@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from kglite_docs import Corpus
+from kglite_docs import Corpus, classify, schema
 from kglite_docs.errors import InvalidEnumError
+
+schema.register_element_discriminator("chunk.sc_element", {"rulex": "RuleX"})
 
 
 def _chunks(corpus: Corpus, tmp_path: Path, n: int = 4) -> list[str]:
@@ -133,6 +135,33 @@ def test_finding_self_verification_rejected(corpus: Corpus, tmp_path: Path) -> N
         corpus.verify_finding(fid, verdict="verified", verifier_agent_id="synth")
     with pytest.raises(InvalidEnumError):  # finding missing
         corpus.verify_finding("nope", verdict="verified", verifier_agent_id="r1")
+
+
+def test_semantic_conflicts_cross_chunk(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _chunks(corpus, tmp_path)
+    # Two different chunks classified as the same element/topic.
+    classify.classify_chunk(corpus.store, chunk_id=ch[0], elements=["rulex"], agent_id="cl")
+    classify.classify_chunk(corpus.store, chunk_id=ch[1], elements=["rulex"], agent_id="cl")
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.8, agent_id="a1")
+    corpus.assess(sid, ch[1], stance="against", weight=0.8, agent_id="a1")
+    # Same-chunk conflicts() sees nothing (opposing stances are on different chunks)…
+    assert corpus.study_conflicts(sid)["total"] == 0
+    # …but the cross-chunk semantic scan flags the shared-element contradiction.
+    sc = corpus.study_semantic_conflicts(sid)
+    assert sc["total"] == 1 and sc["conflicts"][0]["element"] == "rulex"
+    assert sc["checked"] == 2 and sc["skipped_unclassified"] == 0
+
+
+def test_semantic_conflicts_honest_when_unclassified(corpus: Corpus, tmp_path: Path) -> None:
+    ch = _chunks(corpus, tmp_path)
+    sid = corpus.define_study("Q", created_by="lead")
+    corpus.assess(sid, ch[0], stance="supports", weight=0.5, agent_id="a1")
+    corpus.assess(sid, ch[1], stance="against", weight=0.5, agent_id="a1")
+    sc = corpus.study_semantic_conflicts(sid)
+    # Nothing classified → it says "not looked", not a falsely-clean zero.
+    assert sc["checked"] == 0 and sc["total"] == 0
+    assert "note" in sc and "classif" in sc["note"].lower()
 
 
 def test_delete_study_cascades_findings(corpus: Corpus, tmp_path: Path) -> None:

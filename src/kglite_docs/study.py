@@ -884,6 +884,99 @@ def conflicts(store: Store, *, study_id: str) -> dict[str, Any]:
     }
 
 
+def _element_types(raw: Any) -> set[str]:
+    """Distinct element values from a chunk's element_types_json record."""
+    if not raw:
+        return set()
+    try:
+        recs = json.loads(raw)
+    except (TypeError, ValueError):
+        return set()
+    return {str(r["type"]) for r in recs if isinstance(r, dict) and r.get("type")}
+
+
+def semantic_conflicts(store: Store, *, study_id: str) -> dict[str, Any]:
+    """**Cross-chunk** contradictions: within a classified element/topic,
+    *different* chunks carrying opposing stances — one ruling scored `supports`,
+    a conflicting ruling scored `against`. This is the disparate-treatment /
+    conflicting-disposition class that same-chunk `conflicts()` is blind to (the
+    signal lives in the JOIN, not in any one chunk).
+
+    Clustering needs classification (`tag("classify", …)` into an element
+    schema). **Honest coverage:** the return reports `checked` (classified,
+    assessed chunks scanned) vs `skipped_unclassified`; when nothing is
+    classified it says so loudly (a `note`) rather than returning a
+    falsely-clean `total: 0`.
+    """
+    meta = _df_dicts(store.cypher(
+        "MATCH (s:Study {id: $id}) RETURN s.question AS question",
+        params={"id": study_id},
+    ))
+    if not meta:
+        raise InvalidEnumError(f"study not found: {study_id}")
+
+    superseded_ids = _superseded_ids(store, study_id)
+    params: dict[str, Any] = {"id": study_id}
+    sup_filter = ""
+    if superseded_ids:
+        sup_filter = "WHERE NOT latest.id IN $superseded "
+        params["superseded"] = list(superseded_ids)
+    rows = _df_dicts(store.cypher(
+        "MATCH (c:Chunk)-[:ASSESSED_AS]->(a:Assessment)-[:OF_STUDY]->(:Study {id: $id}) "
+        "WITH c, a.by_agent AS ag, a ORDER BY a.created_at DESC "
+        "WITH c, ag, collect(a)[0] AS latest "
+        f"{sup_filter}"
+        "RETURN c.id AS chunk_id, c.doc_id AS doc_id, c.page_number AS page, "
+        "c.element_types_json AS elems, latest.stance AS stance, latest.weight AS weight, "
+        "latest.by_agent AS by_agent, latest.rationale AS rationale "
+        "ORDER BY c.doc_id, c.page_number",
+        params=params,
+    ))
+
+    # Group opposing rows by element value; track classification coverage.
+    by_element: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    classified: set[str] = set()
+    unclassified: set[str] = set()
+    for r in rows:
+        stance = r.get("stance")
+        if stance not in (STANCE_SUPPORTS, STANCE_AGAINST):
+            continue
+        elems = _element_types(r.pop("elems", None))
+        cid = r["chunk_id"]
+        (classified if elems else unclassified).add(cid)
+        side = "supports" if stance == STANCE_SUPPORTS else "against"
+        for el in elems:
+            bucket = by_element.setdefault(el, {"supports": [], "against": []})
+            bucket[side].append(r)
+
+    out: list[dict[str, Any]] = []
+    for el, sides in by_element.items():
+        sup_chunks = {r["chunk_id"] for r in sides["supports"]}
+        ag_chunks = {r["chunk_id"] for r in sides["against"]}
+        # Cross-chunk only: opposing stances spread over ≥2 distinct chunks
+        # (same-chunk supports-vs-against is already `conflicts()`).
+        if sides["supports"] and sides["against"] and len(sup_chunks | ag_chunks) >= 2:
+            out.append({"element": el, "supports": sides["supports"], "against": sides["against"]})
+    out.sort(key=lambda x: len(x["supports"]) + len(x["against"]), reverse=True)
+
+    checked = len(classified)
+    result: dict[str, Any] = {
+        "study_id": study_id,
+        "question": meta[0]["question"],
+        "conflicts": out,
+        "total": len(out),
+        "checked": checked,
+        "skipped_unclassified": len(unclassified),
+    }
+    if checked == 0:
+        result["note"] = (
+            "no assessed chunks are classified — semantic clustering is blind. "
+            'Run tag("classify", …) into an element schema first, then re-check; '
+            "until then a 0 here is 'not looked', not 'nothing there'."
+        )
+    return result
+
+
 # ─── findings (cross-chunk patterns) ────────────────────────────────────────
 
 
