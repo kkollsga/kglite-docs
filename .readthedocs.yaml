@@ -16,9 +16,11 @@ mkdocs:
 
 python:
   install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
+    # Docs-only toolchain — NOT the package. mkdocstrings reads the API from
+    # `src/` statically (Griffe, `paths: [src]` in mkdocs.yml), so the build
+    # needs none of the runtime stack (kglite/onnxruntime/pymupdf). This avoids
+    # kglite's manylinux_2_39-only wheel, which can't install on RTD's glibc and
+    # was failing `pip install .[docs]`.
+    - requirements: docs/requirements.txt
 
 formats: []   # no PDF/ePub for now; mkdocs-material handles search well enough

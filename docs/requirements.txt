@@ -1,0 +1,13 @@
+# Docs build toolchain (Read the Docs).
+#
+# Intentionally does NOT install kglite-docs or its runtime deps. mkdocstrings
+# reads the API straight from `src/` via Griffe's static analysis (see
+# `paths: [src]` in mkdocs.yml), so the docs build needs none of the heavy /
+# platform-specific runtime stack (kglite, onnxruntime, pymupdf, …). This keeps
+# the docs build fast and immune to the runtime wheels' platform matrix — e.g.
+# kglite ships only a manylinux_2_39 wheel, which won't install on RTD's older
+# glibc and was breaking `pip install .[docs]`.
+mkdocs>=1.6
+mkdocs-material>=9.5
+mkdocstrings[python]>=0.27
+black>=24.0   # lets mkdocstrings pretty-format rendered signatures
