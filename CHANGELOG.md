@@ -7,6 +7,17 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+## [0.0.15] — 2026-05-31
+
+*OCR legibility & portability, from a full-corpus run on 0.0.14 (745 pages
+OCR'd). Makes "OCR'd" mean "readable" (illegibility surfaced, not silently
+counted), lets you re-OCR + escalate bad pages, right-sizes/tiles the image so
+fine print survives, makes OCR portable (export/import sidecar) and OCR'd text
+first-class (embedded + searchable), pins model guidance (Sonnet default; small
+models fabricate), and adds a structured batch submit. Plus versioned study
+reports on the graph so analysis stops cluttering the folder. Also folds in the
+Read the Docs build fix (static docs, no runtime stack).*
+
 ### Added — versioned study reports (on the graph, not `.md` litter)
 - **`study("report", name=…, text=…)`** saves a markdown report **on the study
   node** — *named* (several distinct reports per study coexist) and *append-only
