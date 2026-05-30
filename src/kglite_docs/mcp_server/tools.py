@@ -741,6 +741,10 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
           pages). Optional `doc_id`.
         - **`pending`** — pages flagged `needs_ocr`, each with a base64
           PNG render. Optional `doc_id`, `limit`, `include_images`, `dpi`.
+        - **`illegible`** — pages that were OCR'd but came back illegible/partial
+          (all `[ilegível]`/near-empty) — effectively unreadable, the retry
+          worklist. Without this they silently count as covered. Optional
+          `doc_id`, `limit`, `include_images` (re-render for a stronger model).
         - **`request`** — the lazy path: get the OCR **task** for one page (the
           rendered page `image_b64` + a strict verbatim `prompt`) instead of
           empty text. Identify by `page_id` or `doc_id`+`page_number`; requires
@@ -766,6 +770,11 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
                 doc_id=doc_id, limit=limit,
                 include_images=include_images, dpi=dpi,
             )
+        if action == "illegible":
+            return corpus.list_illegible_pages(
+                doc_id=doc_id, limit=limit,
+                include_images=include_images, dpi=dpi,
+            )
         if action == "request":
             r = corpus.request_ocr(
                 page_id=page_id, doc_id=doc_id, page_number=page_number,
@@ -784,7 +793,8 @@ def register_typed_tools(app: Any, corpus: Any) -> None:
             _persist(corpus)
             return r
         raise ValueError(
-            f"ocr(): unknown action {action!r}. Valid: status, pending, request, submit",
+            f"ocr(): unknown action {action!r}. Valid: status, pending, illegible, "
+            "request, submit",
         )
 
     # ─── cluster ──────────────────────────────────────────────────────────

@@ -53,20 +53,22 @@ def coverage_report(store: Store, *, doc_id: str | None = None) -> dict[str, Any
              count(p) AS pages,
              sum(CASE WHEN p.needs_ocr = true THEN 1 ELSE 0 END) AS pending_ocr,
              sum(CASE WHEN coalesce(p.image_block_count, 0) > 0 THEN 1 ELSE 0 END) AS image_pages,
-             sum(CASE WHEN coalesce(p.extractable_alnum, 0) < $thr THEN 1 ELSE 0 END) AS low_text_pages
+             sum(CASE WHEN coalesce(p.extractable_alnum, 0) < $thr THEN 1 ELSE 0 END) AS low_text_pages,
+             sum(CASE WHEN p.ocr_outcome IN ['ocr_illegible', 'ocr_partial'] THEN 1 ELSE 0 END) AS ocr_unreadable
         RETURN d.id AS doc_id, d.title AS title, d.format AS format,
-               pages, pending_ocr, image_pages, low_text_pages
+               pages, pending_ocr, image_pages, low_text_pages, ocr_unreadable
         ORDER BY low_text_pages DESC, pending_ocr DESC, d.title ASC
         """,
         params=params,
     ))
     documents: list[dict[str, Any]] = []
-    tot_pages = tot_pending = tot_image = tot_low = 0
+    tot_pages = tot_pending = tot_image = tot_low = tot_unreadable = 0
     for r in rows:
         pages = int(r.get("pages") or 0)
         pending = int(r.get("pending_ocr") or 0)
         image_pages = int(r.get("image_pages") or 0)
         low = int(r.get("low_text_pages") or 0)
+        unreadable = int(r.get("ocr_unreadable") or 0)
         documents.append({
             "doc_id": r["doc_id"],
             "title": r.get("title"),
@@ -75,22 +77,29 @@ def coverage_report(store: Store, *, doc_id: str | None = None) -> dict[str, Any
             "pending_ocr": pending,
             "image_pages": image_pages,
             "low_text_pages": low,
+            "ocr_unreadable": unreadable,
             "extractable_text_ratio": ((pages - low) / pages) if pages else 1.0,
         })
         tot_pages += pages
         tot_pending += pending
         tot_image += image_pages
         tot_low += low
+        tot_unreadable += unreadable
 
     embedded = _count(store, "MATCH (c:Chunk:Embedded) RETURN count(c) AS n")
     unembedded = _count(
         store, "MATCH (c:Chunk:Ready) WHERE c.embedded = false RETURN count(c) AS n"
     )
 
+    unreadable_note = (
+        f" {tot_unreadable} page(s) were OCR'd but came back illegible/partial — "
+        "still effectively unreadable (see ocr('illegible'))."
+        if tot_unreadable else ""
+    )
     summary = (
         f"{len(documents)} docs / {tot_pages} pages — "
         f"{tot_image} image-only and {tot_low} low-text page(s) are unanalyzed "
-        f"unless OCR'd ({tot_pending} flagged needs_ocr); "
+        f"unless OCR'd ({tot_pending} flagged needs_ocr);{unreadable_note} "
         f"{unembedded} chunk(s) unembedded (search is blind until index())."
     )
     return {
@@ -99,6 +108,7 @@ def coverage_report(store: Store, *, doc_id: str | None = None) -> dict[str, Any
         "image_pages": tot_image,
         "low_text_pages": tot_low,
         "pending_ocr": tot_pending,
+        "ocr_unreadable": tot_unreadable,
         "embedded": embedded,
         "unembedded": unembedded,
         "summary": summary,

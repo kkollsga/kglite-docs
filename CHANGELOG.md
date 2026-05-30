@@ -7,6 +7,18 @@ breaking changes (called out below).
 
 ## [Unreleased]
 
+### Fixed — silent illegibility: "OCR'd" ≠ "readable"
+- **A page OCR'd to all-`[ilegível]`/empty no longer counts as covered.** A
+  full-corpus run found ~25% of OCR'd pages came back illegible/near-empty, yet
+  `ocr_status` read "done" — the same silent-incompleteness failure as the
+  original scanned-pages-pass-as-`ready` bug, one stage later. `submit_ocr` now
+  computes a legibility metric (legible alnum after stripping `[…]` markers) and
+  records a page **`ocr_outcome`** (`ocr_ok` / `ocr_partial` / `ocr_illegible`) +
+  `legible_chars`. `ocr_status` reports `illegible_pages` / `partial_pages` /
+  `readable_pages` (the honest count); `coverage_report` says so loudly; and
+  `ocr("illegible")` lists the unreadable pages as a retry worklist. The
+  illegibility tag is computed by the library, not narrated by the agent.
+
 ## [0.0.14] — 2026-05-30
 
 *Scanned primary evidence stops hiding. A field report found the strongest fact

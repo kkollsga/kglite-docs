@@ -9,6 +9,7 @@ visually and return its markdown via `submit_ocr`.
 from __future__ import annotations
 
 import base64
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,11 @@ from typing import Any
 from kglite_docs.activity import register_agent
 from kglite_docs.errors import InvalidEnumError
 from kglite_docs.ingest.chunker import chunk_page
-from kglite_docs.ingest.parser import render_page_png
+from kglite_docs.ingest.parser import (
+    OCR_TEXT_THRESHOLD,
+    _extractable_alnum,
+    render_page_png,
+)
 from kglite_docs.schema import (
     CHUNK,
     CHUNK_STATUS_READY,
@@ -45,6 +50,36 @@ OCR_PROMPT = (
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# OCR outcome — *did the transcription actually yield readable text?* A page can
+# be OCR'd (attempted) and still be noise: an honest agent returns "[ilegível]" /
+# "[illegible]" for an unreadable scan. That honesty must surface at the page +
+# coverage level, never sink inside chunk text — otherwise "OCR'd" reads as
+# "readable" and a quarter of a record can be noise behind a green light.
+OCR_OK: str = "ocr_ok"
+OCR_PARTIAL: str = "ocr_partial"
+OCR_ILLEGIBLE: str = "ocr_illegible"
+
+_BRACKET_RE = re.compile(r"\[[^\]]*\]")  # [ilegível] / [illegible] / [página ilegível] / …
+
+
+def _legible_chars(markdown: str) -> int:
+    """Count genuinely-readable alphanumeric chars in an OCR transcription —
+    after removing bracketed illegibility markers (any `[…]`) and the image /
+    placeholder markup `_extractable_alnum` already strips. A page that is all
+    `[ilegível]` scores 0."""
+    return _extractable_alnum(_BRACKET_RE.sub(" ", markdown or ""))
+
+
+def _ocr_outcome(legible: int) -> str:
+    """`ocr_illegible` (no readable letters) | `ocr_partial` (< the text floor) |
+    `ocr_ok`. Reuses the same `OCR_TEXT_THRESHOLD` floor detection uses."""
+    if legible <= 0:
+        return OCR_ILLEGIBLE
+    if legible < OCR_TEXT_THRESHOLD:
+        return OCR_PARTIAL
+    return OCR_OK
 
 
 def ocr_status(
@@ -87,19 +122,22 @@ def ocr_status(
         {where}
         OPTIONAL MATCH (d)-[:HAS_PAGE]->(p:Page)
         WITH d, count(p) AS pages,
-             sum(CASE WHEN p.needs_ocr = true THEN 1 ELSE 0 END) AS pending
+             sum(CASE WHEN p.needs_ocr = true THEN 1 ELSE 0 END) AS pending,
+             sum(CASE WHEN p.ocr_outcome = 'ocr_illegible' THEN 1 ELSE 0 END) AS illegible,
+             sum(CASE WHEN p.ocr_outcome = 'ocr_partial' THEN 1 ELSE 0 END) AS partial
         RETURN d.id AS doc_id, d.title AS title, d.format AS format,
-               pages, pending
-        ORDER BY pending DESC, d.title ASC
+               pages, pending, illegible, partial
+        ORDER BY pending DESC, illegible DESC, d.title ASC
         """,
         params=params,
     ))
     documents: list[dict[str, Any]] = []
-    total_pages = 0
-    total_pending = 0
+    total_pages = total_pending = total_illegible = total_partial = 0
     for r in rows:
         pages = int(r.get("pages") or 0)
         pending = int(r.get("pending") or 0)
+        illegible = int(r.get("illegible") or 0)
+        partial = int(r.get("partial") or 0)
         documents.append({
             "doc_id": r["doc_id"],
             "title": r.get("title"),
@@ -107,14 +145,24 @@ def ocr_status(
             "pages": pages,
             "ready": pages - pending,
             "pending": pending,
+            # OCR'd but not actually readable — surfaced, never silently "covered".
+            "illegible": illegible,
+            "partial": partial,
             "pending_fraction": (pending / pages) if pages else 0.0,
         })
         total_pages += pages
         total_pending += pending
+        total_illegible += illegible
+        total_partial += partial
     return {
         "total_pages": total_pages,
         "ready_pages": total_pages - total_pending,
         "pending_pages": total_pending,
+        # Pages OCR'd but illegible/partial are *attempted* yet effectively
+        # unreadable — readable_pages discounts them so "done" can't hide noise.
+        "illegible_pages": total_illegible,
+        "partial_pages": total_partial,
+        "readable_pages": total_pages - total_pending - total_illegible - total_partial,
         "documents_total": len(documents),
         "documents_with_pending": sum(1 for d in documents if d["pending"] > 0),
         "documents": documents,
@@ -150,6 +198,48 @@ def list_pending_ocr(
                     f"source file missing for doc {r['doc_id'][:18]}…: "
                     f"{doc_path or '<no path recorded>'}"
                 )
+                continue
+            try:
+                png = render_page_png(doc_path, int(r["page_number"]), dpi=dpi)
+                r["image_b64"] = base64.b64encode(png).decode("ascii")
+                r["image_mime"] = "image/png"
+            except Exception as exc:  # pragma: no cover
+                r["image_b64"] = ""
+                r["image_error"] = str(exc)
+    return rows
+
+
+def list_illegible_pages(
+    store: Store,
+    *,
+    doc_id: str | None = None,
+    limit: int = 50,
+    include_images: bool = False,
+    dpi: int = 200,
+) -> list[dict[str, Any]]:
+    """Pages that were OCR'd but came back **illegible or partial** (effectively
+    unreadable) — the worklist for human review or a stronger-model retry
+    (`request_ocr(..., force=True)`). Without this they'd silently count as
+    covered. Optional `include_images` renders each page for re-OCR."""
+    where = ["p.ocr_outcome IN ['ocr_illegible', 'ocr_partial']"]
+    params: dict[str, Any] = {}
+    if doc_id:
+        where.append("p.doc_id = $doc_id")
+        params["doc_id"] = doc_id
+    rows = _df_dicts(store.cypher(
+        f"MATCH (d:Document)-[:HAS_PAGE]->(p:Page) WHERE {' AND '.join(where)} "
+        "RETURN p.id AS page_id, p.doc_id AS doc_id, p.page_number AS page_number, "
+        "p.ocr_outcome AS ocr_outcome, p.legible_chars AS legible_chars, "
+        "p.ocr_model AS ocr_model, d.path AS doc_path, d.title AS doc_title "
+        f"ORDER BY p.legible_chars ASC, p.doc_id, p.page_number LIMIT {int(limit)}",
+        params=params,
+    ))
+    if include_images:
+        for r in rows:
+            doc_path = r.get("doc_path") or ""
+            if not doc_path or not Path(doc_path).exists():
+                r["image_b64"] = ""
+                r["image_error"] = f"source file missing: {doc_path or '<no path recorded>'}"
                 continue
             try:
                 png = render_page_png(doc_path, int(r["page_number"]), dpi=dpi)
@@ -256,26 +346,33 @@ def submit_ocr(
     doc_id = page_rows[0]["doc_id"]
     page_number = int(page_rows[0]["page_number"])
 
-    # Delete existing needs_ocr chunks on this page (label predicate
-    # under kglite 0.10.5 multi-label: `(:Chunk:NeedsOcr)`)
+    # Legibility outcome — did this transcription actually yield readable text?
+    legible = _legible_chars(markdown)
+    outcome = _ocr_outcome(legible)
+
+    # Replace ALL chunks on this page (not just :NeedsOcr) so a re-OCR overwrites
+    # cleanly instead of leaving the prior :Ready chunks beside the new ones.
     store.cypher(
-        "MATCH (p:Page {id: $pid})-[:HAS_CHUNK]->(c:Chunk:NeedsOcr) "
-        "DETACH DELETE c",
+        "MATCH (p:Page {id: $pid})-[:HAS_CHUNK]->(c:Chunk) DETACH DELETE c",
         params={"pid": page_id},
     )
-    # Update page state
+    # Update page state. needs_ocr=false (it WAS attempted); ocr_outcome carries
+    # the honest "is it actually readable?" signal.
     store.cypher(
         "MATCH (p:Page {id: $pid}) "
         "SET p.markdown = $md, p.has_text = true, p.needs_ocr = false, "
-        "p.ocr_agent = $aid, p.ocr_model = $m, p.ocr_confidence = $conf",
+        "p.ocr_agent = $aid, p.ocr_model = $m, p.ocr_confidence = $conf, "
+        "p.ocr_outcome = $outcome, p.legible_chars = $legible",
         params={
             "pid": page_id, "md": markdown, "aid": agent_id,
             "m": model, "conf": confidence if confidence is not None else -1.0,
+            "outcome": outcome, "legible": legible,
         },
     )
 
     if not markdown:
-        return {"page_id": page_id, "chunks_added": 0}
+        return {"page_id": page_id, "chunks_added": 0,
+                "ocr_outcome": outcome, "legible_chars": legible}
 
     # Chunk + insert
     chunks = chunk_page(markdown)
@@ -303,7 +400,8 @@ def submit_ocr(
             "ocr_by": agent_id,
         })
     if not chunk_rows:
-        return {"page_id": page_id, "chunks_added": 0}
+        return {"page_id": page_id, "chunks_added": 0,
+                "ocr_outcome": outcome, "legible_chars": legible}
 
     store.upsert_nodes(CHUNK, chunk_rows)
     # New chunks are all ready
@@ -336,4 +434,5 @@ def submit_ocr(
     return {
         "page_id": page_id, "chunks_added": len(chunk_rows),
         "agent_id": agent_id, "model": model,
+        "ocr_outcome": outcome, "legible_chars": legible,
     }

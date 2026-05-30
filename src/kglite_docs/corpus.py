@@ -960,6 +960,18 @@ class Corpus:
             include_images=include_images, dpi=dpi,
         ))
 
+    def list_illegible_pages(
+        self, *, doc_id: str | None = None, limit: int = 50,
+        include_images: bool = False, dpi: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Pages OCR'd but illegible/partial (effectively unreadable) — the
+        worklist for human review or a stronger-model retry via
+        `request_ocr(force=True)`. Optional `include_images` renders each."""
+        return ocr_mod.list_illegible_pages(
+            self._store, doc_id=doc_id, limit=limit,
+            include_images=include_images, dpi=dpi,
+        )
+
     def request_ocr(
         self, *, page_id: str | None = None, doc_id: str | None = None,
         page_number: int | None = None, agent_id: str, agent_type: str = "",

@@ -198,6 +198,10 @@ class PendingOcrRow(TypedDict, total=False):
     image_error: str
 
 
+#: Whether an OCR transcription actually yielded readable text.
+OcrOutcome = Literal["ocr_ok", "ocr_partial", "ocr_illegible"]
+
+
 class OcrStatusRow(TypedDict):
     """Per-document OCR status (the `documents` array in `ocr_status()`)."""
 
@@ -207,6 +211,8 @@ class OcrStatusRow(TypedDict):
     pages: int
     ready: int
     pending: int
+    illegible: int          # OCR'd but no readable letters
+    partial: int            # OCR'd but below the legible-text floor
     pending_fraction: float
 
 
@@ -216,6 +222,9 @@ class OcrStatus(TypedDict):
     total_pages: int
     ready_pages: int
     pending_pages: int
+    illegible_pages: int    # OCR'd but unreadable — not silently "covered"
+    partial_pages: int
+    readable_pages: int     # ready minus illegible/partial — the honest count
     documents_total: int
     documents_with_pending: int
     documents: list[OcrStatusRow]
